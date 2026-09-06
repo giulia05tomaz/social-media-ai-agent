@@ -1,0 +1,721 @@
+{
+  "id": "phase4ImageGeneration",
+  "name": "04 - Geracao de Imagem de Produto",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/image-generation",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "e2dd173a-194a-4f26-9bc7-c5f044be01f1",
+      "name": "Webhook Fase 4",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        0
+      ],
+      "webhookId": "phase4ImageGenerationWebhook"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "260091ed-fbf1-4a67-a5c0-0349aad037d3",
+      "name": "Entrada Subworkflow Imagem",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1080,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  c.content_id, c.client_id, c.image_prompt, c.visual_description, c.generated_image_path,\n  c.briefing, c.request, c.structured_output,\n  v.id::text AS version_id, v.version_label, v.version,\n  b.brand_name, b.business_type, b.primary_colors, b.secondary_colors, b.fonts,\n  b.logo_path, b.brand_rules, b.restrictions, b.preferences,\n  eo.operation_id::text AS existing_operation_id, eo.status AS existing_operation_status, eo.file_path AS existing_operation_path, eo.provider AS existing_provider, eo.model AS existing_model, eo.external_id AS existing_request_id, eo.cost_estimate AS existing_cost, eo.response_metadata->'usage' AS existing_usage,\n  COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key = 'image_provider'), 'mock') AS image_provider,\n  COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key = 'image_model'), 'gpt-image-2') AS image_model\nFROM social_media.content_items c\nJOIN social_media.clients b ON b.client_id = c.client_id\nJOIN LATERAL (SELECT id, version_label, version FROM social_media.content_versions WHERE content_id = c.content_id AND version = 1 LIMIT 1) v ON true\nLEFT JOIN LATERAL (SELECT * FROM social_media.external_operations WHERE version_id=v.id AND operation_type='IMAGE_GENERATION' ORDER BY created_at DESC LIMIT 1) eo ON true\nWHERE c.content_id = $1\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$json.body?.content_id || $json.content_id] }}"
+        }
+      },
+      "id": "f3915576-1639-4dc7-a8e8-38ab391e7194",
+      "name": "Carregar Conteudo e Marca",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -860,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs=require('fs');\nconst input = $json;\nlet precomputedImage = null;\nif (input.image_provider === 'precomputed') {\n  try { precomputedImage = JSON.parse(input.image_model); } catch (error) { throw new Error('Replay de imagem invalido: image_model deve conter JSON.'); }\n  if (!precomputedImage?.source_path || !precomputedImage?.model) throw new Error('Replay de imagem incompleto: source_path e model sao obrigatorios.');\n}\nconst structured = input.structured_output || {};\nconst productCandidates = [structured.intent?.product, input.briefing?.product, input.request?.product, structured.briefing?.product];\nconst product = productCandidates.map(v => typeof v === 'string' ? v.trim() : '').find(Boolean) || '';\nconst objectiveCandidates = [structured.intent?.objective, input.briefing?.objective, structured.briefing?.objective, input.visual_description, structured.content?.visual_description];\nconst objective = objectiveCandidates.map(v => typeof v === 'string' ? v.trim() : '').find(Boolean) || '';\nconst genericProduct = /^(produto|item|comida|alimento|algo|nao informado|não informado|indefinido|desconhecido)$/i.test(product);\nconst subject = product && !genericProduct ? product : objective;\nif (!subject) return [{json:{...input,product:null,needs_clarification:true,clarification_reason:'Assunto ou objetivo ausente no Structured Output e briefing. A geracao foi interrompida sem chamar o provider.'}}];\nconst safeClient = String(input.client_id).replace(/[^a-zA-Z0-9_-]/g, '-');\nconst safeContent = String(input.content_id).replace(/[^a-zA-Z0-9_-]/g, '-');\nconst relativePath = input.existing_operation_path || ('assets/generated/' + safeClient + '/' + safeContent + '/source/image-v' + Number(input.version||1) + '.png');\nconst containerPath = '/data/' + relativePath;\nconst outputDirectory = '/data/assets/generated/' + safeClient + '/' + safeContent + '/source';\nconst existingFile=fs.existsSync(containerPath)&&fs.statSync(containerPath).size>0;\nconst imageExists=input.existing_operation_status==='SUCCESS'&&existingFile;\nif(input.existing_operation_status==='IN_PROGRESS'&&!existingFile)throw new Error('Geracao de imagem anterior permanece IN_PROGRESS; reconciliar antes de nova chamada para evitar cobranca duplicada.');\nconst primary = Array.isArray(input.primary_colors) ? input.primary_colors : [];\nconst secondary = Array.isArray(input.secondary_colors) ? input.secondary_colors : [];\nconst rules = Array.isArray(input.brand_rules) ? input.brand_rules : [];\nconst imagePrompt = input.image_prompt || structured.content?.image_prompt || '';\nconst visualDescription = input.visual_description || structured.content?.visual_description || '';\nconst prompt = [\n  'Use case: ads-marketing',\n  'Asset type: elemento visual para composicao posterior de social media',\n  'Subject from persisted Structured Output: ' + subject,\n  'Persisted image prompt: ' + imagePrompt,\n  'Persisted briefing: ' + JSON.stringify(input.briefing || structured.briefing || {}),\n  'Persisted visual description: ' + visualDescription,\n  'Subject: representar fielmente o assunto solicitado (' + subject + ') sem introduzir temas externos',\n  'Style/medium: visual publicitario profissional, realista ou ilustrativo conforme o briefing, premium e coerente com o segmento da marca',\n  'Composition/framing: enquadramento quadrado, assunto nitido e espaco negativo limpo para composicao grafica posterior',\n  'Brand profile: ' + [input.brand_name, input.business_type].filter(Boolean).join(' — '),\n  'Official palette for atmosphere, surfaces and subtle props only: ' + [...primary, ...secondary].join(', '),\n  'Brand rules: ' + rules.join('; '),\n  'Constraints: gerar somente o elemento visual de fundo; nenhum layout de post; nao inserir nem redesenhar logo; sem nome da marca, texto, letras, numeros, telefone, endereco, preco, promocao, CTA, hashtags, molduras ou marca d agua; nao inventar caracteristicas nao presentes no briefing'\n].join('\\n');\nconst model = precomputedImage?.model || input.image_model || 'gpt-image-2';\nreturn [{json:{...input,image_model:model,precomputed_source_path:precomputedImage?.source_path||null,precomputed_request_id:precomputedImage?.request_id||null,product:product||null,subject,needs_clarification:false,image_exists:imageExists,prompt,relative_path:relativePath,container_path:containerPath,output_directory:outputDirectory,width:Number(precomputedImage?.width||(input.image_provider === 'mock' ? 1 : 1024)),height:Number(precomputedImage?.height||(input.image_provider === 'mock' ? 1 : 1024)),quality:'low',idempotency_key:'image:'+input.version_id,openai_image_request:{model,prompt,size:'1024x1024',quality:'low',n:1,output_format:'png',background:'opaque',moderation:'auto'}}}];"
+      },
+      "id": "03dfd3c8-aad7-4e63-879d-f52d277f46cd",
+      "name": "Preparar Geracao Dinamica",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "39e43020-6530-442f-aadd-b3e8a37d9fc8",
+              "leftValue": "={{ $json.needs_clarification }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ab115b48-c83e-44ef-9054-47fc0fbbb588",
+      "name": "Produto Definido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "666029d7-78f8-4cb4-8769-19f2cc3c1117",
+              "leftValue": "={{ $json.image_exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a8d6ac86-a754-41fd-be78-50c57f1bad81",
+      "name": "Imagem Valida Ja Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH content_ready AS (UPDATE social_media.content_items SET generated_image_path=$3,status='IMAGE_GENERATED',updated_at=now() WHERE content_id=$1 RETURNING client_id,source_message_id), version_ready AS (UPDATE social_media.content_versions SET generated_image_path=$3 WHERE id=$2::uuid RETURNING version_label), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(m.correlation_id,gen_random_uuid()),c.client_id,$1,'IMAGE_REUSED','04 - Geracao de Imagem de Produto',jsonb_build_object('version_id',$2::uuid,'file_path',$3,'operation_id',$4::uuid) FROM content_ready c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id WHERE NOT EXISTS(SELECT 1 FROM social_media.events WHERE content_id=$1 AND event_type='IMAGE_REUSED' AND details->>'version_id'=$2) RETURNING event_id) SELECT $1::text AS content_id,$2::uuid AS version_id,(SELECT version_label FROM version_ready) AS version_label,$5::text AS provider,$6::text AS model,$7::text AS prompt,$8::text AS openai_request_id,$3::text AS file_path,$9::numeric AS cost_estimate_usd,$10::jsonb AS usage,$11::int AS width,$12::int AS height,$13::text AS quality,$14::text AS product,$4::uuid AS external_operation_id,true AS persisted,true AS reused,false AS final_art_created;",
+        "options": {
+          "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.existing_operation_path,$json.existing_operation_id,$json.existing_provider,$json.existing_model,$json.prompt,($json.existing_request_id||null),($json.existing_cost||0),JSON.stringify($json.existing_usage||{}),$json.width,$json.height,$json.quality,$json.product] }}"
+        }
+      },
+      "id": "1b2b5660-bdb0-4b77-bd4a-659056434a76",
+      "name": "Reutilizar Imagem Persistida",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        40,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH operation_started AS (INSERT INTO social_media.external_operations(content_id,version_id,idempotency_key,operation_type,provider,model,prompt,status,response_metadata) VALUES($1,$2::uuid,$3,'IMAGE_GENERATION',$4,$5,$6,'IN_PROGRESS',jsonb_build_object('version_id',$2::uuid,'product',$7)) ON CONFLICT(idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET status='IN_PROGRESS' WHERE social_media.external_operations.status='FAILED' RETURNING operation_id), content_started AS (UPDATE social_media.content_items SET status='GENERATING_IMAGE',updated_at=now() WHERE content_id=$1 AND status IN ('BRIEFING_CREATED','IMAGE_GENERATION_FAILED') RETURNING client_id,source_message_id), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(m.correlation_id,gen_random_uuid()),c.client_id,$1,'IMAGE_GENERATION_STARTED','04 - Geracao de Imagem de Produto',jsonb_build_object('version_id',$2::uuid,'provider',$4,'model',$5,'operation_id',(SELECT operation_id FROM operation_started)) FROM content_started c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id RETURNING event_id) SELECT $1::text AS content_id,$2::text AS version_id,(SELECT operation_id FROM operation_started)::text AS operation_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.idempotency_key,$json.image_provider,$json.image_model,$json.prompt,$json.product] }}"
+        }
+      },
+      "id": "5e09116a-e3fd-457c-adb4-8da5864e16ec",
+      "name": "Registrar Inicio da Imagem",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        40,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH content_updated AS (\n  UPDATE social_media.content_items SET status = 'NEEDS_CLARIFICATION', updated_at = now() WHERE content_id = $1 RETURNING content_id, client_id, source_message_id\n), event_created AS (\n  INSERT INTO social_media.events (correlation_id, client_id, content_id, event_type, workflow_name, details)\n  SELECT COALESCE(m.correlation_id, gen_random_uuid()), c.client_id, c.content_id, 'PRODUCT_CLARIFICATION_REQUIRED', '04 - Geracao de Imagem de Produto', jsonb_build_object('reason', $2, 'provider_called', false)\n  FROM content_updated c LEFT JOIN social_media.messages m ON m.message_id = c.source_message_id RETURNING event_id\n)\nSELECT $1::text AS content_id, $2::text AS clarification_reason, (SELECT event_id FROM event_created LIMIT 1) AS event_id, false AS persisted_image, false AS provider_called;",
+        "options": {
+          "queryReplacement": "={{ [$json.content_id, $json.clarification_reason] }}"
+        }
+      },
+      "id": "c592a115-772e-476f-9fa4-0cf9846ec129",
+      "name": "Registrar Necessidade de Esclarecimento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -180,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "32f9ef40-438d-4e7a-ac0b-e89c69620109",
+      "name": "Responder Esclarecimento",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        60,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "54673fdf-aad5-405d-b646-461c61ef2587",
+              "leftValue": "={{ $('Preparar Geracao Dinamica').first().json.image_provider }}",
+              "rightValue": "openai",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5d9341b9-9a97-4d2a-a923-2fe215c47188",
+      "name": "Provider Imagem OpenAI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -180,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('Preparar Geracao Dinamica').first().json.openai_image_request) }}",
+        "options": {
+          "timeout": 170000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "33d5369b-3018-4bba-a80f-151881301f98",
+      "name": "OpenAI Image API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        -210
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openAiHeaderAuth",
+          "name": "OpenAI API Key (env)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs=require('fs');\nconst context = $('Preparar Geracao Dinamica').first().json;\nlet png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';\nlet requestId='mock-' + Date.now();\nif (context.image_provider === 'precomputed') {\n  const source='/data/' + String(context.precomputed_source_path||'').replace(/^\\/+/, '');\n  if (!fs.existsSync(source) || fs.statSync(source).size===0) throw new Error('Imagem precomputada nao encontrada em ' + source);\n  png=fs.readFileSync(source).toString('base64');\n  requestId=context.precomputed_request_id||('precomputed-' + Date.now());\n}\nreturn [{json:{body:{created:Math.floor(Date.now()/1000),data:[{b64_json:png}],usage:{input_tokens:0,output_tokens:0,total_tokens:0,input_tokens_details:{text_tokens:0,image_tokens:0}}},headers:{'x-request-id':requestId},statusCode:200,image_provider:context.image_provider}}];"
+      },
+      "id": "42f9af77-b307-4930-8404-0bd02fd282b8",
+      "name": "Provider Imagem Mock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        10
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "19ab8a72-2224-4c45-8e0b-e5c45f3d43c3",
+              "leftValue": "={{ Boolean(($json.body||$json).data?.[0]?.b64_json) && Number($json.statusCode||200) < 400 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f744f853-26a5-46a6-9e3e-aeeac1a794b9",
+      "name": "Resposta de Imagem Valida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        280,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH context AS (SELECT c.client_id,c.source_message_id,m.correlation_id FROM social_media.content_items c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id WHERE c.content_id=$1), operation_failed AS (UPDATE social_media.external_operations SET status='FAILED',response_metadata=response_metadata||jsonb_build_object('error',$3,'http_status',$4::int),cost_estimate=0 WHERE idempotency_key=$2 AND status='IN_PROGRESS' RETURNING operation_id), content_failed AS (UPDATE social_media.content_items SET status='IMAGE_GENERATION_FAILED',updated_at=now() WHERE content_id=$1 RETURNING content_id), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,severity,details) SELECT COALESCE(context.correlation_id,gen_random_uuid()),context.client_id,$1,'IMAGE_GENERATION_FAILED','04 - Geracao de Imagem de Produto','ERROR',jsonb_build_object('operation_id',(SELECT operation_id FROM operation_failed),'error',$3,'http_status',$4::int,'renderer_called',false) FROM context RETURNING event_id) SELECT $1::text AS content_id,'IMAGE_GENERATION_FAILED'::text AS status,$3::text AS error,$4::int AS http_status,false AS persisted_image,false AS renderer_called;",
+        "options": {
+          "queryReplacement": "={{ [$('Preparar Geracao Dinamica').first().json.content_id,$('Preparar Geracao Dinamica').first().json.idempotency_key,JSON.stringify($json.body?.error||$json.error||$json),Number($json.statusCode||0)] }}"
+        }
+      },
+      "id": "87f1c2ba-c863-4fcf-909a-79e138bd6d71",
+      "name": "Persistir Falha de Imagem",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        500,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst response = $json;\nconst context = $('Preparar Geracao Dinamica').first().json;\nconst api = response.body || response;\nconst base64 = api.data?.[0]?.b64_json;\nif (!base64) throw new Error('Image API nao retornou b64_json.');\nfs.mkdirSync(context.output_directory, { recursive: true });\nconst usage = api.usage || {};\nconst details = usage.input_tokens_details || {};\nconst textInput = Number(details.text_tokens ?? usage.input_tokens ?? 0);\nconst imageInput = Number(details.image_tokens ?? 0);\nconst outputTokens = Number(usage.output_tokens ?? (context.image_provider === 'openai' ? 196 : 0));\nconst cost = context.image_provider === 'openai' ? (textInput * 5 + imageInput * 8 + outputTokens * 30) / 1000000 : 0;\nconst requestId = response.headers?.['x-request-id'] || response.headers?.['X-Request-Id'] || null;\nreturn [{json:{...context,openai_request_id:requestId,image_usage:usage,image_cost_estimate:cost,api_created_at:api.created || null},binary:{data:{data:base64,mimeType:'image/png',fileName:context.relative_path.split('/').pop(),fileExtension:'png'}}}];"
+      },
+      "id": "7585f3da-8ea4-4e0e-b5e6-839133231121",
+      "name": "Preparar Arquivo e Custo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.container_path }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "9ce9aed9-d12d-4747-a948-af558880240b",
+      "name": "Salvar PNG",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        520,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://renderer:8000/validate-image",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({content_id:$('Preparar Geracao Dinamica').first().json.content_id,version_id:$('Preparar Geracao Dinamica').first().json.version_id,source_image_path:$('Preparar Geracao Dinamica').first().json.relative_path,expected_width:$('Preparar Geracao Dinamica').first().json.width,expected_height:$('Preparar Geracao Dinamica').first().json.height}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3802188f-6e77-4527-9729-5452f1c41f02",
+      "name": "Validar PNG Interno",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c48e81a8-bd83-42d6-8af5-286c351808c0",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6a9dd6cd-8b30-41f6-87bd-45794b0dc3bc",
+      "name": "PNG Salvo Valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx=$('Preparar Arquivo e Custo').first().json;return [{json:{...ctx,width:$json.width,height:$json.height,image_validated:true}}];"
+      },
+      "id": "6bb03433-9682-4637-9540-2fcc0b14fcaf",
+      "name": "Restaurar Contexto da Imagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH operation_updated AS (UPDATE social_media.external_operations SET external_id=$6,file_path=$7,cost_estimate=$8::numeric,status='SUCCESS',response_metadata=jsonb_build_object('version_id',$2::uuid,'usage',$9::jsonb,'product',$13,'width',$10::int,'height',$11::int,'quality',$12,'format','png'),created_at=created_at WHERE idempotency_key=$14 AND status='IN_PROGRESS' RETURNING operation_id,created_at), content_updated AS (UPDATE social_media.content_items SET generated_image_path=$7,status='IMAGE_GENERATED',updated_at=now() WHERE content_id=$1 RETURNING content_id), version_updated AS (UPDATE social_media.content_versions SET generated_image_path=$7 WHERE id=$2::uuid AND content_id=$1 RETURNING version_label), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(m.correlation_id,gen_random_uuid()),c.client_id,c.content_id,'IMAGE_GENERATED','04 - Geracao de Imagem de Produto',jsonb_build_object('version_id',$2::uuid,'provider',$3,'model',$4,'product',$13,'file_path',$7,'request_id',$6,'cost_estimate_usd',$8::numeric) FROM social_media.content_items c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id WHERE c.content_id=$1 RETURNING event_id) SELECT $1::text AS content_id,$2::uuid AS version_id,(SELECT version_label FROM version_updated LIMIT 1) AS version_label,$3::text AS provider,$4::text AS model,$5::text AS prompt,$6::text AS openai_request_id,$7::text AS file_path,$8::numeric AS cost_estimate_usd,$9::jsonb AS usage,$10::int AS width,$11::int AS height,$12::text AS quality,$13::text AS product,(SELECT operation_id FROM operation_updated LIMIT 1) AS external_operation_id,(SELECT created_at FROM operation_updated LIMIT 1) AS created_at,true AS persisted,false AS reused,false AS final_art_created;",
+        "options": {
+          "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.image_provider,$json.image_model,$json.prompt,($json.openai_request_id||null),$json.relative_path,$json.image_cost_estimate,JSON.stringify($json.image_usage||{}),$json.width,$json.height,$json.quality,$json.product,$json.idempotency_key] }}"
+        }
+      },
+      "id": "6db25e68-7adc-4872-b9e5-3ac67498b369",
+      "name": "Persistir Imagem e Metadados",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        740,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "c44af9ac-6abd-479e-a9dd-559b2ee36c93",
+      "name": "Responder Fase 4",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        -100
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Fase 4": {
+      "main": [
+        [
+          {
+            "node": "Carregar Conteudo e Marca",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada Subworkflow Imagem": {
+      "main": [
+        [
+          {
+            "node": "Carregar Conteudo e Marca",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar Conteudo e Marca": {
+      "main": [
+        [
+          {
+            "node": "Preparar Geracao Dinamica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Geracao Dinamica": {
+      "main": [
+        [
+          {
+            "node": "Produto Definido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Produto Definido?": {
+      "main": [
+        [
+          {
+            "node": "Imagem Valida Ja Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar Necessidade de Esclarecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Imagem Valida Ja Existe?": {
+      "main": [
+        [
+          {
+            "node": "Reutilizar Imagem Persistida",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar Inicio da Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Inicio da Imagem": {
+      "main": [
+        [
+          {
+            "node": "Provider Imagem OpenAI?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider Imagem OpenAI?": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Image API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Provider Imagem Mock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Image API": {
+      "main": [
+        [
+          {
+            "node": "Resposta de Imagem Valida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider Imagem Mock": {
+      "main": [
+        [
+          {
+            "node": "Resposta de Imagem Valida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta de Imagem Valida?": {
+      "main": [
+        [
+          {
+            "node": "Preparar Arquivo e Custo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persistir Falha de Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Arquivo e Custo": {
+      "main": [
+        [
+          {
+            "node": "Salvar PNG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar PNG": {
+      "main": [
+        [
+          {
+            "node": "Validar PNG Interno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar PNG Interno": {
+      "main": [
+        [
+          {
+            "node": "PNG Salvo Valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PNG Salvo Valido?": {
+      "main": [
+        [
+          {
+            "node": "Restaurar Contexto da Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persistir Falha de Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar Contexto da Imagem": {
+      "main": [
+        [
+          {
+            "node": "Persistir Imagem e Metadados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "tags": []
+}

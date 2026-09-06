@@ -1,0 +1,118 @@
+{
+  "template_id": "webtech-ai-agent-v1",
+  "engine": "local-pillow",
+  "canvas": {"width": 1080, "height": 1080},
+  "palette_roles": {
+    "background": "#000000",
+    "primary": "#FFFFFF",
+    "accent": "#3B3F40",
+    "secondary": "#3B3F40",
+    "light": "#FFFFFF"
+  },
+  "decorative_elements": [
+    {"id": "top-line", "type": "rectangle", "bounds": [64, 246, 420, 250], "fill": "#3B3F40"},
+    {"id": "copy-separator", "type": "rounded_rectangle", "bounds": [64, 716, 360, 722], "radius": 3, "fill": "#3B3F40"},
+    {"id": "right-edge", "type": "rectangle", "bounds": [1066, 0, 1080, 1080], "fill": "#FFFFFF"}
+  ],
+  "logo": {
+    "variant": "official_black_background",
+    "asset": "assets/brands/webtech-demo/logos/webtech-official-logo.jpg",
+    "source_crop": [0, 0, 1280, 1280],
+    "x": 46,
+    "y": 30,
+    "width": 190,
+    "height": 190
+  },
+  "product_image": {
+    "x": 500,
+    "y": 0,
+    "width": 566,
+    "height": 1080,
+    "corner_radius": 0,
+    "crop": "cover",
+    "focus_x": 0.76,
+    "focus_y": 0.5
+  },
+  "headline": {
+    "x": 64,
+    "y": 286,
+    "width": 390,
+    "max_width": 390,
+    "max_height": 270,
+    "max_font_size": 68,
+    "min_font_size": 34,
+    "line_height": 1.02,
+    "max_lines": 5,
+    "allow_word_break": false,
+    "overflow": "shrink_then_wrap",
+    "align": "left",
+    "color": "#FFFFFF",
+    "font_family": "Arial"
+  },
+  "subtitle": {
+    "x": 66,
+    "y": 580,
+    "width": 375,
+    "font_size": 32,
+    "max_font_size": 32,
+    "min_font_size": 20,
+    "max_width": 375,
+    "max_height": 130,
+    "max_lines": 4,
+    "line_height": 1.16,
+    "allow_word_break": false,
+    "overflow": "shrink_then_wrap",
+    "align": "left",
+    "color": "#FFFFFF",
+    "font_family": "Arial"
+  },
+  "cta": {
+    "x": 64,
+    "y": 780,
+    "width": 240,
+    "height": 68,
+    "font_size": 24,
+    "max_font_size": 24,
+    "min_font_size": 17,
+    "min_width": 240,
+    "max_width": 382,
+    "horizontal_padding": 26,
+    "max_lines": 1,
+    "allow_word_break": false,
+    "overflow": "shrink",
+    "background": "#FFFFFF",
+    "color": "#000000",
+    "font_family": "Arial"
+  },
+  "typography": {
+    "official": "Siwa",
+    "official_file_available": false,
+    "temporary_fallback": "Arial",
+    "fallback_authorized": true,
+    "fallback_scope": "testing only"
+  },
+  "safety": {
+    "product_scale": {"min": 0.75, "max": 1.40},
+    "logo_scale": {"min": 0.70, "max": 1.30},
+    "move_step": 24,
+    "max_total_move": 120,
+    "font_size": {"min": 17, "max": 90},
+    "product_bounds": {"min_x": 490, "max_right": 1066, "min_y": 0, "max_bottom": 1080},
+    "safe_areas": {
+      "text": {"x": 48, "y": 260, "width": 420, "height": 650},
+      "product": {"x": 490, "y": 0, "width": 576, "height": 1080}
+    },
+    "gaps": {
+      "headline_subtitle": 28,
+      "subtitle_separator": 24,
+      "separator_cta": 34
+    },
+    "collision_rules": {
+      "safe_gap": 20,
+      "allow_text_overlap_with_product_image": false,
+      "decorative_elements_role": "background",
+      "protected_elements": ["logo", "product_image", "headline", "subtitle", "cta"]
+    },
+    "layout_priority": ["logo", "product_image", "headline", "subtitle", "cta", "decorative_elements"]
+  }
+}

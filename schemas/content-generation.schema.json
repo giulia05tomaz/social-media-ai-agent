@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SocialMediaContentGeneration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intent", "automatic_response", "briefing", "content"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "confidence", "raw_request", "objective", "product", "format", "content_type", "brand_identity_required"],
+      "properties": {
+        "name": {"type": "string", "enum": ["create_social_media_art", "unknown"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "raw_request": {"type": "string"},
+        "objective": {"type": "string"},
+        "product": {"type": ["string", "null"]},
+        "format": {"type": "string"},
+        "content_type": {"type": "string"},
+        "brand_identity_required": {"type": "boolean"}
+      }
+    },
+    "automatic_response": {"type": "string"},
+    "briefing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id", "objective", "product", "content_type", "visual_style", "brand_identity", "requires_generated_image", "status", "elements", "observations"],
+      "properties": {
+        "client_id": {"type": "string"},
+        "objective": {"type": "string"},
+        "product": {"type": ["string", "null"]},
+        "content_type": {"type": "string"},
+        "visual_style": {"type": "string"},
+        "brand_identity": {"type": "boolean"},
+        "requires_generated_image": {"type": "boolean"},
+        "status": {"type": "string"},
+        "elements": {"type": "array", "items": {"type": "string"}},
+        "observations": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "subtitle", "cta", "caption", "hashtags", "visual_description", "image_prompt", "assembly_instructions"],
+      "properties": {
+        "title": {"type": "string"},
+        "subtitle": {"type": "string"},
+        "cta": {"type": "string"},
+        "caption": {"type": "string"},
+        "hashtags": {"type": "array", "items": {"type": "string"}},
+        "visual_description": {"type": "string"},
+        "image_prompt": {"type": "string"},
+        "assembly_instructions": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

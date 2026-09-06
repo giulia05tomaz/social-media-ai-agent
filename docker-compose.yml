@@ -1,0 +1,282 @@
+name: social-media-ai-agent
+
+services:
+  postgres:
+    image: postgres:16.9-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGDATABASE: ${POSTGRES_DB}
+      TZ: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  migrations:
+    image: postgres:16.9-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_MODEL: ${AI_MODEL:-mock-v1}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mock}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2}
+      ART_RENDERER: ${ART_RENDERER:-local}
+      APPROVAL_AI_PROVIDER: ${APPROVAL_AI_PROVIDER:-mock}
+      APPROVAL_AI_MODEL: ${APPROVAL_AI_MODEL:-gpt-5-mini}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        for migration in /migrations/*.sql; do
+          echo "[migrations] Applying $${migration}"
+          psql -v ON_ERROR_STOP=1 \
+            -v ai_provider="$${AI_PROVIDER}" \
+            -v ai_model="$${AI_MODEL}" \
+            -v image_provider="$${IMAGE_PROVIDER}" \
+            -v image_model="$${IMAGE_MODEL}" \
+            -v art_renderer="$${ART_RENDERER}" \
+            -v approval_ai_provider="$${APPROVAL_AI_PROVIDER}" \
+            -v approval_ai_model="$${APPROVAL_AI_MODEL}" \
+            -f "$${migration}"
+        done
+    volumes:
+      - ./database/migrations:/migrations:ro
+    networks:
+      - backend
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.32.6
+    restart: unless-stopped
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      renderer:
+        condition: service_healthy
+      media-delivery:
+        condition: service_healthy
+      publication-service:
+        condition: service_healthy
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      TZ: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "true"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: ${EXECUTIONS_DATA_MAX_AGE:-336}
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      N8N_LOG_OUTPUT: console
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+      N8N_RUNNERS_TASK_TIMEOUT: 180
+      NODE_FUNCTION_ALLOW_BUILTIN: fs,crypto
+      N8N_RESTRICT_FILE_ACCESS_TO: /data/assets
+      DEMO_MODE: ${DEMO_MODE:-true}
+      LIVE_MODE: ${LIVE_MODE:-false}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_MODEL: ${AI_MODEL:-mock-v1}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mock}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ART_RENDERER: ${ART_RENDERER:-local}
+      APPROVAL_AI_PROVIDER: ${APPROVAL_AI_PROVIDER:-mock}
+      APPROVAL_AI_MODEL: ${APPROVAL_AI_MODEL:-gpt-5-mini}
+      RENDERER_URL: http://renderer:8000
+      MEDIA_DELIVERY_URL: http://media-delivery:8080
+      MEDIA_DELIVERY_INTERNAL_KEY: ${MEDIA_DELIVERY_INTERNAL_KEY:?MEDIA_DELIVERY_INTERNAL_KEY is required}
+      SOCIAL_PUBLISH_PROVIDER: ${SOCIAL_PUBLISH_PROVIDER:-mock}
+      INSTAGRAM_PUBLISH_ENABLED: ${INSTAGRAM_PUBLISH_ENABLED:-false}
+      INSTAGRAM_API_VERSION: ${INSTAGRAM_API_VERSION:-v26.0}
+      BUFFER_API_URL: ${BUFFER_API_URL:-https://api.buffer.com}
+      BUFFER_ACCOUNT_ID: ${BUFFER_ACCOUNT_ID:-}
+      BUFFER_PUBLISH_ENABLED: ${BUFFER_PUBLISH_ENABLED:-false}
+      BUFFER_DRY_RUN: ${BUFFER_DRY_RUN:-true}
+      PUBLICATION_WORKER_ENABLED: ${PUBLICATION_WORKER_ENABLED:-false}
+      PUBLICATION_SERVICE_URL: http://publication-service:8000
+      MEDIA_STORAGE_PROVIDER: ${MEDIA_STORAGE_PROVIDER:-local}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    entrypoint: ["/bin/sh", "/bootstrap/bootstrap.sh"]
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/bootstrap:/bootstrap:ro
+      - ./n8n/workflows:/workflows:ro
+      - ./assets:/data/assets
+    networks:
+      - backend
+
+  publication-service:
+    build:
+      context: .
+      dockerfile: publication/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PROJECT_ROOT: /data
+      DEMO_MODE: ${DEMO_MODE:-true}
+      LIVE_MODE: ${LIVE_MODE:-false}
+      SOCIAL_PUBLISH_PROVIDER: ${SOCIAL_PUBLISH_PROVIDER:-mock}
+      BUFFER_PUBLISH_ENABLED: ${BUFFER_PUBLISH_ENABLED:-false}
+      BUFFER_DRY_RUN: ${BUFFER_DRY_RUN:-true}
+      PUBLICATION_WORKER_ENABLED: ${PUBLICATION_WORKER_ENABLED:-false}
+      INSTAGRAM_PUBLISH_ENABLED: ${INSTAGRAM_PUBLISH_ENABLED:-false}
+      MEDIA_STORAGE_PROVIDER: ${MEDIA_STORAGE_PROVIDER:-r2}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      MEDIA_UPLOAD_MAX_ATTEMPTS: ${MEDIA_UPLOAD_MAX_ATTEMPTS:-3}
+      MEDIA_UPLOAD_RETRY_SECONDS: ${MEDIA_UPLOAD_RETRY_SECONDS:-2}
+      BUFFER_API_KEY: ${BUFFER_API_KEY:-}
+      BUFFER_API_URL: ${BUFFER_API_URL:-https://api.buffer.com}
+      PUBLICATION_SERVICE_INTERNAL_KEY: ${MEDIA_DELIVERY_INTERNAL_KEY:?MEDIA_DELIVERY_INTERNAL_KEY is required}
+      FIRST_LIVE_TARGET_USERNAME: ${FIRST_LIVE_TARGET_USERNAME:-}
+      BUFFER_STATUS_POLL_ATTEMPTS: ${BUFFER_STATUS_POLL_ATTEMPTS:-24}
+      BUFFER_STATUS_POLL_SECONDS: ${BUFFER_STATUS_POLL_SECONDS:-5}
+    volumes:
+      - ./assets:/data/assets:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=5).read()"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 15s
+    networks:
+      - backend
+
+  renderer:
+    build:
+      context: ./renderer
+    restart: unless-stopped
+    environment:
+      PROJECT_ROOT: /app
+      TEMPLATE_DIR: /app/templates
+      LOG_LEVEL: INFO
+    volumes:
+      - ./assets:/app/assets
+      - ./templates:/app/templates:ro
+      - ./tests:/app/tests
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - backend
+
+  media-delivery:
+    build:
+      context: ./media-delivery
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MEDIA_DELIVERY_PORT:-8081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      MEDIA_ROOT: /data
+      MEDIA_URL_TTL_MINUTES: ${MEDIA_URL_TTL_MINUTES:-30}
+      MEDIA_DELIVERY_INTERNAL_KEY: ${MEDIA_DELIVERY_INTERNAL_KEY:?MEDIA_DELIVERY_INTERNAL_KEY is required}
+      PUBLIC_MEDIA_BASE_URL: ${PUBLIC_MEDIA_BASE_URL:-http://media-delivery:8080}
+    volumes:
+      - ./assets:/data/assets:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health',timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - backend
+
+  storage-cli:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: publication/Dockerfile
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PROJECT_ROOT: /data
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      MEDIA_UPLOAD_MAX_ATTEMPTS: ${MEDIA_UPLOAD_MAX_ATTEMPTS:-3}
+      MEDIA_UPLOAD_RETRY_SECONDS: ${MEDIA_UPLOAD_RETRY_SECONDS:-2}
+      BUFFER_API_KEY: ${BUFFER_API_KEY:-}
+      BUFFER_API_URL: ${BUFFER_API_URL:-https://api.buffer.com}
+    volumes:
+      - ./assets:/data/assets:ro
+      - ./docs:/app/docs
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  n8n_data:
+
+networks:
+  backend:
+    driver: bridge

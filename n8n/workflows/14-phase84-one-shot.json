@@ -1,0 +1,14 @@
+{
+  "name":"08.4 - First Live Publication One-Shot",
+  "id":"phase84FirstLiveOneShot",
+  "active":false,
+  "settings":{"executionOrder":"v1"},
+  "nodes":[
+    {"parameters":{"httpMethod":"POST","path":"live/phase84/publish-one-shot","responseMode":"responseNode","options":{}},"id":"p84-live-webhook","name":"Phase 8.4 One-Shot","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"webhookId":"phase84-first-live-one-shot"},
+    {"parameters":{"jsCode":"const b=$json.body||$json;const keys=Object.keys(b);if(keys.length!==1||keys[0]!=='publication_job_id'||typeof b.publication_job_id!=='string'||!b.publication_job_id.trim())throw new Error('publication_job_id e o unico campo permitido');return [{json:{publication_job_id:b.publication_job_id.trim()}}];"},"id":"p84-live-contract","name":"Validar Release One-Shot","type":"n8n-nodes-base.code","typeVersion":2,"position":[240,0]},
+    {"parameters":{"method":"POST","url":"http://publication-service:8000/publish-authorized","authentication":"genericCredentialType","genericAuthType":"httpHeaderAuth","sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{ JSON.stringify($json) }}","options":{"timeout":240000}},"id":"p84-live-service","name":"Executar Mutation One-Shot","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[490,0],"credentials":{"httpHeaderAuth":{"id":"mediaDeliveryHeaderAuth","name":"Media Delivery Internal Key (env)"}}},
+    {"parameters":{"respondWith":"json","responseBody":"={{ $json }}","options":{"responseCode":200}},"id":"p84-live-response","name":"Responder Resultado Live","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.4,"position":[740,0]}
+  ],
+  "connections":{"Phase 8.4 One-Shot":{"main":[[{"node":"Validar Release One-Shot","type":"main","index":0}]]},"Validar Release One-Shot":{"main":[[{"node":"Executar Mutation One-Shot","type":"main","index":0}]]},"Executar Mutation One-Shot":{"main":[[{"node":"Responder Resultado Live","type":"main","index":0}]]}},
+  "pinData":{},"tags":[]
+}

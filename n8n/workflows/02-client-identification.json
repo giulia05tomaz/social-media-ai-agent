@@ -1,0 +1,39 @@
+{
+  "id": "socialMediaPhase2ClientIdentity",
+  "name": "02 - Identificacao do Cliente e Marca",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {"inputSource": "passthrough"},
+      "id": "aa3ff8d5-7ea8-4692-93e2-b764fca9e090",
+      "name": "Entrada Fase 2",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH channel_match AS (\n  SELECT c.*\n  FROM social_media.channel_identities ci\n  JOIN social_media.clients c ON c.client_id = ci.client_id\n  WHERE ci.channel = $1 AND ci.external_sender_id = $2 AND ci.active = true\n  LIMIT 1\n), resolved AS (\n  SELECT * FROM channel_match\n  UNION ALL\n  SELECT c.* FROM social_media.clients c\n  WHERE c.client_id = $3 AND NOT EXISTS (SELECT 1 FROM channel_match)\n  LIMIT 1\n), updated_message AS (\n  UPDATE social_media.messages m\n  SET client_id = r.client_id\n  FROM resolved r\n  WHERE m.message_id = $4::uuid\n  RETURNING m.*\n), inserted_event AS (\n  INSERT INTO social_media.events (\n    correlation_id, client_id, event_type, workflow_name, details\n  )\n  SELECT $5::uuid, r.client_id, 'CLIENT_IDENTIFIED',\n         '02 - Identificacao do Cliente e Marca',\n         jsonb_build_object('message_id', m.message_id, 'brand_name', r.brand_name, 'channel', m.channel)\n  FROM updated_message m CROSS JOIN resolved r\n  RETURNING event_id\n)\nSELECT\n  m.message_id, m.correlation_id, m.channel, m.external_message_id,\n  m.sender_id, m.body AS message, r.client_id, r.brand_name,\n  jsonb_build_object(\n    'client_id', r.client_id, 'brand_name', r.brand_name,\n    'business_type', r.business_type, 'logo_path', r.logo_path,\n    'primary_colors', r.primary_colors, 'secondary_colors', r.secondary_colors,\n    'fonts', r.fonts, 'tone', r.tone, 'address', r.address,\n    'phone', r.phone, 'instagram', r.instagram, 'website', r.website,\n    'rules', r.brand_rules, 'products', r.products, 'services', r.services,\n    'reference_images', r.reference_images, 'templates', r.templates,\n    'restrictions', r.restrictions, 'preferences', r.preferences\n  ) AS brand_profile,\n  COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key = 'ai_provider'), 'mock') AS ai_provider,\n  COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key = 'ai_model'), 'mock-v1') AS ai_model,\n  true AS client_identified\nFROM updated_message m CROSS JOIN resolved r;",
+        "options": {
+          "queryReplacement": "={{ [$json.channel, $json.sender_id, $json.requested_client_id, $json.message_id, $json.correlation_id] }}"
+        }
+      },
+      "id": "f0a13eb6-b3c1-4c2e-b014-a235b2e746c4",
+      "name": "Resolver Cliente e Carregar Marca",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-70, 0],
+      "credentials": {
+        "postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}
+      }
+    }
+  ],
+  "connections": {
+    "Entrada Fase 2": {"main": [[{"node": "Resolver Cliente e Carregar Marca", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1", "timezone": "America/Sao_Paulo", "callerPolicy": "workflowsFromSameOwner"},
+  "versionId": "1882dcf8-d76a-4429-aab0-9b99a87723f8",
+  "meta": {"templateCredsSetupCompleted": true},
+  "tags": []
+}

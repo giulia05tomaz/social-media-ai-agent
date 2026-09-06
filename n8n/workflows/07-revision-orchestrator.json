@@ -1,0 +1,87 @@
+{
+  "id": "phase61RevisionOrchestrator",
+  "name": "06.1 - Orquestrador de Revisao",
+  "active": false,
+  "settings": {"executionOrder": "v1", "timezone": "America/Sao_Paulo", "callerPolicy": "workflowsFromSameOwner"},
+  "nodes": [
+    {
+      "parameters": {"inputSource": "passthrough"},
+      "id": "f1edc37e-f82a-49e7-b356-12a3af4328d1",
+      "name": "Entrada Revisao",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-760, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH eligible AS MATERIALIZED (\n  SELECT c.content_id,c.client_id,c.source_message_id,c.current_version_id,v.version,v.briefing,v.copy,v.generated_image_path,\n    ro.layout_spec,ro.source_image_path,ro.template_id,ro.renderer,cr.change_request_id,cr.interpreted_changes,cr.approval_id,\n    (SELECT COALESCE(max(version),0)+1 FROM social_media.content_versions WHERE content_id=c.content_id) AS next_version\n  FROM social_media.content_items c\n  JOIN social_media.content_versions v ON v.id=c.current_version_id\n  JOIN social_media.render_outputs ro ON ro.version_id=v.id AND ro.status='READY_FOR_APPROVAL'\n  JOIN social_media.change_requests cr ON cr.content_id=c.content_id AND cr.source_version_id=v.id\n  WHERE c.content_id=$1 AND v.id=$2::uuid AND cr.change_request_id=$3::uuid\n    AND c.status='CHANGES_REQUESTED' AND cr.status='INTERPRETED' AND cr.target_version_id IS NULL\n  FOR UPDATE OF c,cr\n), new_version AS (\n  INSERT INTO social_media.content_versions (content_id,version,change_request,briefing,copy,generated_image_path)\n  SELECT content_id,next_version,jsonb_build_object('change_request_id',change_request_id,'source_version_id',current_version_id,'changes',interpreted_changes),briefing,copy,generated_image_path FROM eligible\n  RETURNING id,content_id,version,version_label\n), paths AS (\n  SELECT e.*,n.id AS target_version_id,n.version AS target_version,n.version_label,\n    'assets/generated/'||regexp_replace(e.client_id,'[^a-zA-Z0-9_-]','-','g')||'/'||e.content_id||'/rendered/final-v'||n.version||'.png' AS output_path,\n    'assets/generated/'||regexp_replace(e.client_id,'[^a-zA-Z0-9_-]','-','g')||'/'||e.content_id||'/specs/layout-v'||n.version||'.json' AS layout_spec_path\n  FROM eligible e JOIN new_version n ON n.content_id=e.content_id\n), render_started AS (\n  INSERT INTO social_media.render_outputs (content_id,version_id,template_id,renderer,source_image_path,final_art_path,layout_spec_path,status)\n  SELECT content_id,target_version_id,template_id,renderer,source_image_path,output_path,layout_spec_path,'CREATING_ART' FROM paths RETURNING render_id,version_id\n), request_updated AS (\n  UPDATE social_media.change_requests cr SET target_version_id=p.target_version_id,status='REVISION_IN_PROGRESS',updated_at=now() FROM paths p WHERE cr.change_request_id=p.change_request_id RETURNING cr.change_request_id\n), content_updated AS (\n  UPDATE social_media.content_items c SET status='RENDERING',updated_at=now() FROM paths p WHERE c.content_id=p.content_id RETURNING c.content_id\n), audit AS (\n  INSERT INTO social_media.events (correlation_id,client_id,content_id,event_type,workflow_name,details)\n  SELECT COALESCE(m.correlation_id,gen_random_uuid()),p.client_id,p.content_id,e.event_type,'06.1 - Orquestrador de Revisao',e.details\n  FROM paths p LEFT JOIN social_media.messages m ON m.message_id=p.source_message_id\n  CROSS JOIN LATERAL (VALUES\n    ('REVISION_STARTED',jsonb_build_object('change_request_id',p.change_request_id,'source_version_id',p.current_version_id,'target_version_id',p.target_version_id,'version_label',p.version_label)),\n    ('ART_RENDER_STARTED',jsonb_build_object('render_id',(SELECT render_id FROM render_started),'version_id',p.target_version_id,'renderer',p.renderer,'mode','revision'))\n  ) e(event_type,details)\n)\nSELECT p.content_id,p.client_id,p.current_version_id::text AS source_version_id,p.target_version_id::text AS version_id,p.version_label,p.change_request_id::text,p.template_id,p.renderer,p.layout_spec,p.interpreted_changes AS changes,p.output_path,p.layout_spec_path FROM paths p;",
+        "options": {"queryReplacement": "={{ [$json.content_id,$json.version_id,$json.change_request_id] }}"}
+      },
+      "id": "d6497cab-9d18-43e3-a13d-68352cf8f903",
+      "name": "Criar Versao e Iniciar Render",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-520, 0],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://renderer:8000/apply-and-render",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({content_id:$json.content_id,source_version_id:$json.source_version_id,version_id:$json.version_id,version_label:$json.version_label,change_request_id:$json.change_request_id,client_id:$json.client_id,template_id:$json.template_id,renderer:$json.renderer,layout_spec:$json.layout_spec,changes:$json.changes,output_path:$json.output_path,layout_spec_path:$json.layout_spec_path}) }}",
+        "options": {"timeout": 120000}
+      },
+      "id": "0b0ccfa8-e004-49a5-a739-2d79b73c4718",
+      "name": "Renderer Interno",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0]
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "72fcba17-f185-4efc-93bb-15854c2bcb0a", "leftValue": "={{ $json.status }}", "rightValue": "success", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}, "options": {}},
+      "id": "5bceee2b-03b6-49a3-a11c-b07aa9cd775e",
+      "name": "Render OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ctx AS (SELECT cr.*,a.client_id,a.channel,a.message_id,m.correlation_id FROM social_media.change_requests cr JOIN social_media.approvals a ON a.approval_id=cr.approval_id LEFT JOIN social_media.messages m ON m.message_id=a.message_id WHERE cr.change_request_id=$1::uuid AND cr.target_version_id=$2::uuid),\nrender_ready AS (UPDATE social_media.render_outputs SET layout_spec=$3::jsonb,width=$4::int,height=$5::int,checksum_sha256=$6,status='READY_FOR_APPROVAL',rendered_at=now(),updated_at=now() WHERE version_id=$2::uuid RETURNING render_id),\nversion_ready AS (UPDATE social_media.content_versions SET final_art_path=$7 WHERE id=$2::uuid RETURNING version_label),\nrequest_ready AS (UPDATE social_media.change_requests SET applied_changes=$8::jsonb,status='APPLIED',applied_at=now(),updated_at=now() WHERE change_request_id=$1::uuid RETURNING change_request_id),\ncontent_ready AS (UPDATE social_media.content_items c SET current_version_id=$2::uuid,final_art_path=$7,status='READY_FOR_APPROVAL',updated_at=now() FROM ctx WHERE c.content_id=ctx.content_id RETURNING c.content_id),\nevents AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,ctx.content_id,e.event_type,'06.1 - Orquestrador de Revisao',e.details FROM ctx CROSS JOIN LATERAL (VALUES\n ('LAYOUT_UPDATED',jsonb_build_object('version_id',$2::uuid,'change_request_id',$1::uuid,'applied_changes',$8::jsonb)),\n ('ART_RENDERED',jsonb_build_object('version_id',$2::uuid,'render_id',(SELECT render_id FROM render_ready),'width',$4::int,'height',$5::int,'checksum_sha256',$6)),\n ('REVISION_CREATED',jsonb_build_object('source_version_id',ctx.source_version_id,'target_version_id',$2::uuid,'version_label',(SELECT version_label FROM version_ready))),\n ('ART_READY_FOR_APPROVAL',jsonb_build_object('version_id',$2::uuid,'final_art_path',$7,'layout_spec_path',$9,'checksum_sha256',$6))\n) e(event_type,details) RETURNING event_id),\noutbound AS (INSERT INTO social_media.messages(correlation_id,client_id,channel,direction,sender_id,body,raw_payload) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,ctx.channel,'OUTBOUND','system','Perfeito. Fiz a alteração solicitada e preparei uma nova versão para aprovação.',jsonb_build_object('content_id',ctx.content_id,'version_id',$2::uuid,'change_request_id',$1::uuid) FROM ctx RETURNING message_id)\nSELECT ctx.content_id,$2::uuid AS version_id,(SELECT version_label FROM version_ready) AS version_label,'changes_requested'::text AS decision,'READY_FOR_APPROVAL'::text AS status,$7::text AS final_art_path,$9::text AS layout_spec_path,$6::text AS checksum_sha256,$8::jsonb AS applied_changes,(SELECT render_id FROM render_ready) AS render_id,(SELECT message_id FROM outbound) AS outbound_message_id,'Perfeito. Fiz a alteração solicitada e preparei uma nova versão para aprovação.'::text AS automatic_response,true AS automated FROM ctx;",
+        "options": {"queryReplacement": "={{ [$json.change_request_id,$json.version_id,JSON.stringify($json.layout_spec),$json.width,$json.height,$json.checksum_sha256,$json.output_path,JSON.stringify($json.applied_changes),$json.layout_spec_path] }}"}
+      },
+      "id": "af05d6ab-cd32-49b0-9132-71fd8517b721",
+      "name": "Persistir Revisao Concluida",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [220, -100],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ctx AS (SELECT cr.content_id,cr.change_request_id,cr.target_version_id,a.client_id,m.correlation_id FROM social_media.change_requests cr JOIN social_media.approvals a ON a.approval_id=cr.approval_id LEFT JOIN social_media.messages m ON m.message_id=a.message_id WHERE cr.change_request_id=$1::uuid AND cr.target_version_id=$2::uuid),\nrender_failed AS (UPDATE social_media.render_outputs SET status=CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'FAILED' END,error_message=$3,updated_at=now() WHERE version_id=$2::uuid RETURNING render_id),\nrequest_failed AS (UPDATE social_media.change_requests SET status='FAILED',updated_at=now() WHERE change_request_id=$1::uuid RETURNING change_request_id),\ncontent_failed AS (UPDATE social_media.content_items c SET status=CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'FAILED' END,updated_at=now() FROM ctx WHERE c.content_id=ctx.content_id RETURNING c.content_id),\nevents AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,severity,details) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,ctx.content_id,e.event_type,'06.1 - Orquestrador de Revisao','ERROR',jsonb_build_object('version_id',$2::uuid,'change_request_id',$1::uuid,'error',$3,'error_code',$4,'validation',$5::jsonb) FROM ctx CROSS JOIN LATERAL (VALUES(CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'RENDER_FAILED' END),('REVISION_FAILED')) e(event_type))\nSELECT ctx.content_id,$2::uuid AS version_id,CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'FAILED' END AS status,$3::text AS error,$5::jsonb AS validation,false AS automated FROM ctx;",
+        "options": {"queryReplacement": "={{ [$json.change_request_id,$json.version_id,$json.error,$json.error_code||'ART_RENDER_FAILED',JSON.stringify($json.validation||{})] }}"}
+      },
+      "id": "d1819f0e-8f7b-481d-a780-fdb8377cb7d1",
+      "name": "Persistir Falha da Revisao",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [220, 100],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    }
+  ],
+  "connections": {
+    "Entrada Revisao": {"main": [[{"node": "Criar Versao e Iniciar Render", "type": "main", "index": 0}]]},
+    "Criar Versao e Iniciar Render": {"main": [[{"node": "Renderer Interno", "type": "main", "index": 0}]]},
+    "Renderer Interno": {"main": [[{"node": "Render OK?", "type": "main", "index": 0}]]},
+    "Render OK?": {"main": [[{"node": "Persistir Revisao Concluida", "type": "main", "index": 0}], [{"node": "Persistir Falha da Revisao", "type": "main", "index": 0}]]}
+  },
+  "pinData": {},
+  "tags": []
+}

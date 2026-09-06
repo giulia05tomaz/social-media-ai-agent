@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="430" viewBox="0 0 1400 430" role="img" aria-labelledby="title desc">
+  <title id="title">Aprovação e versionamento</title><desc id="desc">A primeira versão recebe uma alteração de texto, cria a segunda versão e então é aprovada.</desc>
+  <defs><linearGradient id="bg" x1="0" x2="1"><stop stop-color="#09090b"/><stop offset="1" stop-color="#27272a"/></linearGradient><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#a1a1aa"/></marker><style>.box{fill:#18181b;stroke:#52525b;stroke-width:2}.h{fill:#fafafa;font:700 24px Arial,sans-serif}.p{fill:#a1a1aa;font:18px Arial,sans-serif}.line{stroke:#a1a1aa;stroke-width:3;marker-end:url(#a)}</style></defs>
+  <rect width="1400" height="430" rx="28" fill="url(#bg)"/><text x="70" y="75" fill="#fafafa" font-family="Arial,sans-serif" font-size="34" font-weight="700">Revisão sem perder histórico</text>
+  <g transform="translate(70 145)">
+    <rect class="box" width="300" height="145" rx="20"/><text class="h" x="28" y="48">v1 • DRAFT</text><text class="p" x="28" y="88">Agente de Social Media IA</text><text class="p" x="28" y="119">checksum e layout salvos</text>
+    <path class="line" d="M300 72h95"/><text class="p" x="348" y="47" text-anchor="middle">replace_text</text>
+    <rect class="box" x="415" width="360" height="145" rx="20"/><text class="h" x="443" y="48">v2 • REVIEW</text><text class="p" x="443" y="88">Agente de IA para Social Media</text><text class="p" x="443" y="119">nova versão, mesma origem</text>
+    <path class="line" d="M775 72h95"/><text class="p" x="822" y="47" text-anchor="middle">aprovar</text>
+    <rect x="890" width="360" height="145" rx="20" fill="#fafafa"/><text x="918" y="48" fill="#09090b" font-family="Arial,sans-serif" font-size="24" font-weight="700">v2 • APPROVED</text><text x="918" y="88" fill="#3f3f46" font-family="Arial,sans-serif" font-size="18">arte e legenda bloqueadas</text><text x="918" y="119" fill="#3f3f46" font-family="Arial,sans-serif" font-size="18">prontas para agendamento</text>
+  </g>
+  <text x="70" y="365" fill="#a1a1aa" font-family="Arial,sans-serif" font-size="20">A aprovação de conteúdo é separada da autorização de publicação.</text>
+</svg>

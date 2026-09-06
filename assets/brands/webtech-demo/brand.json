@@ -1,0 +1,43 @@
+{
+  "client_id": "webtech-demo",
+  "brand_name": "WebTech",
+  "timezone": "America/Sao_Paulo",
+  "logo": {
+    "official": true,
+    "asset": "assets/brands/webtech-demo/logos/webtech-official-logo.jpg",
+    "source": "user-provided",
+    "background": "black"
+  },
+  "palette": {
+    "black": "#000000",
+    "white": "#FFFFFF",
+    "gray": "#3B3F40"
+  },
+  "typography": {
+    "official": "Siwa",
+    "official_file_available": false,
+    "font_asset": null,
+    "fallback_authorized": true,
+    "fallback_family": "Arial",
+    "fallback_scope": "temporary testing only"
+  },
+  "brand_rules": {
+    "business": [
+      "technology",
+      "automation",
+      "marketing",
+      "programming"
+    ],
+    "visual_direction": "Use only technology, automation, marketing and programming concepts, with the official black, white and gray palette and elements coherent with the supplied logo.",
+    "prohibited": [
+      "colors outside the official palette",
+      "visual themes unrelated to the business",
+      "AI-generated or redesigned logo",
+      "assets or identity from another brand"
+    ]
+  },
+  "default_template": "webtech-ai-agent-v1",
+  "enabled_platforms": [
+    "instagram"
+  ]
+}

@@ -1,0 +1,172 @@
+{
+  "id": "phase6ApprovalResponse",
+  "name": "06 - Resposta de Aprovacao e Alteracao",
+  "active": false,
+  "settings": {"executionOrder": "v1", "timezone": "America/Sao_Paulo"},
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "demo/approval-response", "responseMode": "responseNode", "options": {}},
+      "id": "72c46955-cdfa-47fc-936b-25b590e16e56", "name": "Webhook Aprovacao", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [-1240, 0], "webhookId": "phase6ApprovalResponseWebhook"
+    },
+    {
+      "parameters": {"jsCode": "const body = $json.body || $json;\nconst channel = String(body.channel || 'webhook').trim();\nconst senderId = String(body.sender_id || '').trim();\nconst contentId = String(body.content_id || '').trim();\nconst message = String(body.message || '').trim();\nif (!senderId || !/^CONTENT-\\d{4}-\\d{5}$/.test(contentId) || !message) throw new Error('Payload invalido: sender_id, content_id e message sao obrigatorios.');\nconst externalMessageId = String(body.external_message_id || ('approval-' + Date.now() + '-' + Math.random().toString(36).slice(2,10)));\nreturn [{json:{channel,sender_id:senderId,content_id:contentId,message,external_message_id:externalMessageId}}];"},
+      "id": "a86d6ae8-6d09-444b-b1da-7926a5a894f8", "name": "Normalizar Resposta", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-1020, 0]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "WITH i AS (SELECT $1::text channel,$2::text sender_id,$3::text content_id,$4::text message,$5::text external_message_id) SELECT i.*,m.message_id::text AS existing_message_id,(m.message_id IS NOT NULL) AS is_duplicate,a.approval_id::text AS existing_approval_id,a.decision AS existing_decision,a.version_id::text AS existing_version_id,cr.change_request_id::text AS existing_change_request_id,cr.target_version_id::text AS existing_target_version_id,COALESCE(a.decision='changes_requested' AND cr.target_version_id IS NULL AND cr.status IN ('INTERPRETED','IMAGE_REGENERATION_REQUIRED') AND jsonb_array_length(cr.interpreted_changes)>0 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(cr.interpreted_changes) x WHERE x->>'operation' NOT IN ('scale','move','replace_text','change_color')) AND m.body !~* '(troca|substitui).*(imagem|produto)|outra foto|nova imagem',false) AS recoverable_revision,CASE WHEN m.message_id IS NOT NULL THEN 'Mensagem duplicada ignorada; nenhum novo processamento foi iniciado.' ELSE NULL END AS duplicate_message FROM i LEFT JOIN social_media.messages m ON m.channel=i.channel AND m.external_message_id=i.external_message_id LEFT JOIN social_media.approvals a ON a.message_id=m.message_id LEFT JOIN social_media.change_requests cr ON cr.approval_id=a.approval_id;", "options": {"queryReplacement": "={{ [$json.channel,$json.sender_id,$json.content_id,$json.message,$json.external_message_id] }}"}},
+      "id": "29b86e12-6ec8-46be-9757-c8682763bdda",
+      "name": "Verificar Duplicidade",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-900, 0],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "36e376c0-ffec-43dc-be98-4992c29707d2", "leftValue": "={{ $json.is_duplicate }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}], "combinator": "and"}, "options": {}},
+      "id": "22004e28-2963-4664-8d80-b44378ab31c1",
+      "name": "Mensagem Duplicada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-700, 0]
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "1f4b8a0d-459f-4ad2-9cd4-75dfdf0a4c20", "leftValue": "={{ $json.recoverable_revision }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}], "combinator": "and"}, "options": {}},
+      "id": "a4fe78ce-3153-45b5-9a44-e52970d59662",
+      "name": "Revisao Pendente Recuperavel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-560, 200]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "WITH approval_fixed AS (UPDATE social_media.approvals SET structured_decision=jsonb_set(structured_decision,'{requires_image_regeneration}','false'::jsonb,true) WHERE approval_id=$1::uuid RETURNING approval_id,content_id,version_id,client_id,message_id), request_fixed AS (UPDATE social_media.change_requests SET requires_image_regeneration=false,status='INTERPRETED',updated_at=now() WHERE change_request_id=$2::uuid AND target_version_id IS NULL RETURNING change_request_id), audit AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(m.correlation_id,gen_random_uuid()),a.client_id,a.content_id,'REVISION_RESUMED','06 - Resposta de Aprovacao e Alteracao',jsonb_build_object('approval_id',a.approval_id,'change_request_id',(SELECT change_request_id FROM request_fixed),'reason','safe_layout_change_reclassified') FROM approval_fixed a LEFT JOIN social_media.messages m ON m.message_id=a.message_id RETURNING event_id) SELECT a.content_id,a.version_id::text,$2::text AS change_request_id,'changes_requested'::text AS decision,jsonb_set(ap.structured_decision,'{requires_image_regeneration}','false'::jsonb,true) AS structured_decision FROM approval_fixed a JOIN social_media.approvals ap ON ap.approval_id=a.approval_id WHERE EXISTS (SELECT 1 FROM request_fixed);", "options": {"queryReplacement": "={{ [$json.existing_approval_id,$json.existing_change_request_id] }}"}},
+      "id": "13a25799-830c-4ef2-bcee-6a8c09c14ad8",
+      "name": "Retomar Revisao Persistida",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-320, 120],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{ {content_id:$json.content_id,duplicate:true,external_message_id:$json.external_message_id,message_id:$json.existing_message_id,approval_id:$json.existing_approval_id,decision:$json.existing_decision,version_id:$json.existing_version_id,target_version_id:$json.existing_target_version_id,automatic_response:$json.duplicate_message} }}", "options": {"responseCode": 200}},
+      "id": "50b3f128-f38f-469d-ad4e-32f160fa6b12",
+      "name": "Responder Duplicidade",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [-480, 200]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "WITH input AS (SELECT $1::text channel, $2::text sender_id, $3::text content_id, $4::text message, $5::text external_message_id),\nresolved AS (SELECT i.*, ci.client_id AS resolved_client_id FROM input i LEFT JOIN social_media.channel_identities ci ON ci.channel=i.channel AND ci.external_sender_id=i.sender_id AND ci.active=true),\ncontext AS (\n  SELECT r.*, c.client_id AS content_client_id, c.status AS content_status, c.current_version_id,\n    v.version_label, v.version, ro.layout_spec, ro.layout_spec_path, ro.source_image_path,\n    b.primary_colors || b.secondary_colors AS palette,\n    COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key='approval_ai_provider'),'mock') AS approval_provider,\n    COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key='approval_ai_model'),'gpt-5-mini') AS approval_model\n  FROM resolved r\n  LEFT JOIN social_media.content_items c ON c.content_id=r.content_id\n  LEFT JOIN social_media.content_versions v ON v.id=c.current_version_id\n  LEFT JOIN social_media.render_outputs ro ON ro.version_id=v.id AND ro.status='READY_FOR_APPROVAL'\n  LEFT JOIN social_media.clients b ON b.client_id=c.client_id\n), inbound AS (\n  INSERT INTO social_media.messages (client_id,channel,external_message_id,direction,sender_id,body,raw_payload,correlation_id)\n  SELECT CASE WHEN resolved_client_id=content_client_id THEN resolved_client_id ELSE NULL END, channel, external_message_id, 'INBOUND', sender_id, message, jsonb_build_object('content_id',content_id), gen_random_uuid()\n  FROM context RETURNING message_id,correlation_id\n), received_event AS (\n  INSERT INTO social_media.events (correlation_id,client_id,content_id,event_type,workflow_name,details)\n  SELECT i.correlation_id, CASE WHEN c.resolved_client_id=c.content_client_id THEN c.resolved_client_id ELSE NULL END,\n    CASE WHEN c.content_client_id IS NOT NULL THEN c.content_id ELSE NULL END, 'APPROVAL_RESPONSE_RECEIVED', '06 - Resposta de Aprovacao e Alteracao',\n    jsonb_build_object('message_id',i.message_id,'channel',c.channel,'sender_id',c.sender_id,'content_status',c.content_status)\n  FROM context c CROSS JOIN inbound i RETURNING event_id\n)\nSELECT c.*, i.message_id::text, i.correlation_id::text,\n  (c.resolved_client_id IS NOT NULL AND c.resolved_client_id=c.content_client_id AND c.current_version_id IS NOT NULL AND c.layout_spec IS NOT NULL AND c.content_status IN ('READY_FOR_APPROVAL','SENT_FOR_APPROVAL')) AS request_valid,\n  CASE\n    WHEN c.resolved_client_id IS NULL THEN 'Identidade de canal nao encontrada.'\n    WHEN c.resolved_client_id<>c.content_client_id THEN 'Conteudo nao pertence ao cliente identificado.'\n    WHEN c.content_status NOT IN ('READY_FOR_APPROVAL','SENT_FOR_APPROVAL') THEN 'Estado incompativel: ' || COALESCE(c.content_status,'NOT_FOUND')\n    WHEN c.current_version_id IS NULL OR c.layout_spec IS NULL THEN 'Versao/layout atual nao encontrado.'\n    ELSE NULL END AS validation_error\nFROM context c CROSS JOIN inbound i;", "options": {"queryReplacement": "={{ [$json.channel,$json.sender_id,$json.content_id,$json.message,$json.external_message_id] }}"}},
+      "id": "ef5f91c1-d7da-459f-af11-b6915656ff41", "name": "Carregar Estado e Persistir Entrada", "type": "n8n-nodes-base.postgres", "typeVersion": 2.7, "position": [-800, 0], "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "0aeef162-69d0-4b8e-9371-8c9ce941f42c", "leftValue": "={{ $json.request_valid }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}], "combinator": "and"}, "options": {}},
+      "id": "5baa1018-92d7-452a-9ffd-cd7cbd5c704c", "name": "Estado Compativel?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [-580, 0]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "WITH event_created AS (INSERT INTO social_media.events (correlation_id,client_id,content_id,event_type,workflow_name,details) VALUES ($1::uuid,$2,$3,'APPROVAL_STATE_REJECTED','06 - Resposta de Aprovacao e Alteracao',jsonb_build_object('reason',$4,'provider_called',false)) RETURNING event_id) SELECT $3::text AS content_id,$4::text AS error,(SELECT event_id FROM event_created),false AS provider_called;", "options": {"queryReplacement": "={{ [$json.correlation_id,($json.resolved_client_id||null),$json.content_id,$json.validation_error] }}"}},
+      "id": "b1eeffb5-930d-4378-8c4f-b60f4a91f2d0", "name": "Registrar Estado Invalido", "type": "n8n-nodes-base.postgres", "typeVersion": 2.7, "position": [-360, 180], "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{ $json }}", "options": {"responseCode": 409}},
+      "id": "62510710-9338-4d29-967a-358949e20789", "name": "Responder Estado Invalido", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [-120, 180]
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": false, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "49030322-ee94-4f97-bd1d-76a26c0b85dc", "leftValue": "={{ $json.approval_provider }}", "rightValue": "openai", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}, "options": {}},
+      "id": "ca1f318c-d507-47d8-8044-b1e11120e805", "name": "Provider Aprovacao OpenAI?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [-360, -100]
+    },
+    {
+      "parameters": {"jsCode": "const input=$json;\nconst original=String(input.message);\nconst text=original.toLocaleLowerCase('pt-BR');\nlet decision='unclear',changes=[],regen=false,clarification='Pode me dizer o que você gostaria de alterar?';\nif(/(rejeito|não quero usar|nao quero usar|descarto essa arte)/.test(text)){decision='rejected';clarification=null;}\nelse if(/(troca|substitui).*(imagem|produto)|outra foto|nova imagem/.test(text)){decision='changes_requested';regen=true;clarification=null;}\nelse{\n if(/deixa.*(imagem|produto).*(maior|grande)|aumenta.*(imagem|produto)/.test(text))changes.push({target:'product_image',operation:'scale',value:1.15});\n if(/move.*logo.*(cima|acima)/.test(text))changes.push({target:'logo',operation:'move',value:{direction:'up',amount:20}});\n const exact=original.match(/(?:troca|mude|altera)(?: o)? (?:t[ií]tulo|headline) para\\s+(.+?)[.!]?$/i);\n if(exact)changes.push({target:'headline',operation:'replace_text',value:exact[1].replace(/[.!]+$/,'').trim()});\n if(changes.length){decision='changes_requested';clarification=null;}\n else if(/(pode postar|est[aá] aprovado|aprovado|pode seguir|ficou [oó]timo|perfeito)/.test(text)){decision='approved';clarification=null;}\n}\nconst structured={decision,confidence:1,requires_image_regeneration:regen,changes,clarification_message:clarification};\nreturn [{json:{...input,structured_decision:structured,interpretation_provider:'mock',interpretation_model:'mock-approval-v2',interpretation_response_id:'mock-'+Date.now(),interpretation_usage:{input_tokens:0,output_tokens:0,total_tokens:0},interpretation_cost:0,interpretation_prompt:input.message}}];"},
+      "id": "3949acd1-d27b-460b-88ba-96f0e1e8c5d3", "name": "Provider Aprovacao Mock", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-120, 20]
+    },
+    {
+      "parameters": {"jsCode": "const input=$json;\nconst moveValue={type:'object',additionalProperties:false,required:['direction','amount'],properties:{direction:{type:'string',enum:['up','down','left','right']},amount:{type:'number',minimum:1,maximum:120}}};\nconst schema={type:'object',additionalProperties:false,required:['decision','confidence','requires_image_regeneration','changes','clarification_message'],properties:{decision:{type:'string',enum:['approved','changes_requested','rejected','unclear']},confidence:{type:'number',minimum:0,maximum:1},requires_image_regeneration:{type:'boolean'},changes:{type:'array',maxItems:8,items:{type:'object',additionalProperties:false,required:['target','operation','value'],properties:{target:{type:'string',enum:['product_image','headline','subtitle','cta','logo','background']},operation:{type:'string',enum:['scale','move','replace_text','change_color']},value:{anyOf:[{type:'number'},{type:'string'},moveValue]}}}},clarification_message:{type:['string','null']}}};\nconst instructions='Classifique a resposta de aprovacao em portugues e produza somente JSON estrito. Nunca gere codigo, comandos, coordenadas ou caminhos. approved exige aprovacao inequivoca. rejected exige rejeicao inequivoca e sem pedido concreto. unclear significa insatisfacao sem alteracao acionavel. Troca de produto/foto/composicao exige requires_image_regeneration=true. scale: apenas product_image/logo, numero entre 0.70 e 1.40. move: product_image/headline/subtitle/cta/logo, value={direction:up|down|left|right,amount:1..120}. replace_text: headline/subtitle/cta e preserve literalmente o texto fornecido. change_color: somente background/headline/subtitle/cta e apenas cor da brand_palette.';\nconst prompt=JSON.stringify({message:input.message,current_version:input.version_label,layout:{product_image:input.layout_spec.product_image,headline:input.layout_spec.headline,subtitle:input.layout_spec.subtitle,cta:input.layout_spec.cta,logo:input.layout_spec.logo,background:input.layout_spec.background},brand_palette:input.palette});\nconst model=!input.approval_model||input.approval_model==='mock-v1'?'gpt-5-mini':input.approval_model;\nreturn [{json:{...input,interpretation_prompt:prompt,openai_request:{model,store:false,instructions,input:prompt,text:{format:{type:'json_schema',name:'approval_decision',strict:true,schema},verbosity:'low'}}}}];"},
+      "id": "aef1e567-a393-4f85-9d23-306c63261252", "name": "Montar Requisicao Aprovacao", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-120, -220]
+    },
+    {
+      "parameters": {"method": "POST", "url": "https://api.openai.com/v1/responses", "authentication": "genericCredentialType", "genericAuthType": "httpHeaderAuth", "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ JSON.stringify($json.openai_request) }}", "options": {"timeout": 60000}},
+      "id": "64aa05c5-b512-4ec6-9fe7-e42de748c718", "name": "OpenAI Approval Responses", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [120, -220], "credentials": {"httpHeaderAuth": {"id": "openAiHeaderAuth", "name": "OpenAI API Key (env)"}}
+    },
+    {
+      "parameters": {"jsCode": "const response=$json;\nconst context=$('Montar Requisicao Aprovacao').first().json;\nconst text=response.output_text||(response.output||[]).flatMap(i=>i.content||[]).find(i=>i.type==='output_text')?.text;\nif(!text) throw new Error('OpenAI nao retornou approval Structured Output.');\nconst usage=response.usage||{};\nconst inputTokens=Number(usage.input_tokens||0), cached=Number(usage.input_tokens_details?.cached_tokens||0), output=Number(usage.output_tokens||0);\nconst cost=((inputTokens-cached)*0.25+cached*0.025+output*2)/1000000;\nreturn [{json:{...context,structured_decision:JSON.parse(text),interpretation_provider:'openai',interpretation_model:response.model||context.approval_model,interpretation_response_id:response.id,interpretation_usage:usage,interpretation_cost:cost}}];"},
+      "id": "6a527355-f8e1-4c60-a2cb-058806d6ca5b", "name": "Interpretar Aprovacao OpenAI", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [360, -220]
+    },
+    {
+      "parameters": {"jsCode": "const input=$json;\nconst d=input.structured_decision||{};\nconst decisions=['approved','changes_requested','rejected','unclear'];\nconst targets=['product_image','headline','subtitle','cta','logo','background'];\nconst operations=['scale','move','replace_text','change_color'];\nif(!decisions.includes(d.decision)||typeof d.confidence!=='number'||!Array.isArray(d.changes)||typeof d.requires_image_regeneration!=='boolean')throw new Error('Structured decision invalida.');\nconst message=String(input.message);\nconst explicitImageReplacement=/(troca|substitui).*(imagem|produto)|outra foto|nova imagem/i.test(message);\nif(explicitImageReplacement)d.requires_image_regeneration=true;\nlet invalid=false;\nfor(const c of d.changes){\n if(!targets.includes(c.target)||!operations.includes(c.operation))invalid=true;\n if(c.operation==='scale'&&(!(typeof c.value==='number')||!['product_image','logo'].includes(c.target)))invalid=true;\n if(c.operation==='replace_text'&&(!(typeof c.value==='string')||!c.value.trim()||!['headline','subtitle','cta'].includes(c.target)))invalid=true;\n if(c.operation==='change_color'&&(!(typeof c.value==='string')||!['background','headline','subtitle','cta'].includes(c.target)||!input.palette.includes(c.value)))invalid=true;\n if(c.operation==='move'&&(!(c.value&&typeof c.value==='object')||!['product_image','headline','subtitle','cta','logo'].includes(c.target)||!['up','down','left','right'].includes(String(c.value.direction).toLowerCase())||typeof c.value.amount!=='number'||c.value.amount<=0||c.value.amount>120))invalid=true;\n}\nif(d.decision==='changes_requested'&&d.changes.length&&!explicitImageReplacement)d.requires_image_regeneration=false;\nif(invalid||(d.decision==='changes_requested'&&!d.requires_image_regeneration&&!d.changes.length)){d.decision='unclear';d.changes=[];d.requires_image_regeneration=false;d.clarification_message='Pode me dizer com mais detalhes o que você gostaria de alterar?';}\nif(['approved','rejected','unclear'].includes(d.decision)){d.changes=[];d.requires_image_regeneration=false;}\nif(d.decision==='unclear')d.clarification_message=d.clarification_message||'Pode me dizer o que você gostaria de alterar?';\nconst automaticResponse=d.decision==='approved'?'Perfeito. Conteúdo aprovado e pronto para agendamento.':d.decision==='rejected'?'Entendido. Essa versão foi rejeitada. Se quiser, me diga o que gostaria de mudar para eu criar uma nova versão.':d.decision==='changes_requested'?(d.requires_image_regeneration?'A alteração pede uma nova fotografia. Registrei a solicitação e aguardarei autorização antes de gerar.':'Perfeito. Vou ajustar e preparar uma nova versão.'):(d.clarification_message||'Pode me dizer o que você gostaria de alterar?');\nconst outcomeEvent=d.decision==='approved'?'CONTENT_APPROVED':d.decision==='rejected'?'CONTENT_REJECTED':d.decision==='changes_requested'?(d.requires_image_regeneration?'IMAGE_REGENERATION_REQUIRED':'CHANGES_REQUESTED'):'CLARIFICATION_REQUESTED';\nreturn [{json:{...input,structured_decision:d,automatic_response:automaticResponse,outcome_event:outcomeEvent}}];"},
+      "id": "20498226-df9d-45ce-ae4c-bdf19f3ee8fc", "name": "Validar Alteracoes Declarativas", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [600, -80]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "WITH operation_created AS (\n  INSERT INTO social_media.external_operations (content_id,operation_type,provider,model,prompt,external_id,cost_estimate,status,response_metadata)\n  VALUES ($1,'APPROVAL_INTERPRETATION',$9,$10,$11,$12,$14::numeric,'SUCCESS',jsonb_build_object('version_id',$2::uuid,'usage',$13::jsonb,'decision',$8::jsonb)) RETURNING operation_id\n), approval_created AS (\n  INSERT INTO social_media.approvals (content_id,version_id,client_id,message_id,channel,sender_id,decision,message,structured_decision,provider,model,response_id,usage,cost_estimate,approved_at)\n  VALUES ($1,$2::uuid,$3,$4::uuid,$5,$6,$7,$15,$8::jsonb,$9,$10,$12,$13::jsonb,$14::numeric,CASE WHEN $7='approved' THEN now() ELSE NULL END) RETURNING approval_id\n), change_created AS (\n  INSERT INTO social_media.change_requests (approval_id,content_id,source_version_id,requested_by,request_message,interpreted_changes,requires_image_regeneration,status)\n  SELECT approval_id,$1,$2::uuid,$6,$15,($8::jsonb)->'changes',COALESCE((($8::jsonb)->>'requires_image_regeneration')::boolean,false),\n    CASE WHEN COALESCE((($8::jsonb)->>'requires_image_regeneration')::boolean,false) THEN 'IMAGE_REGENERATION_REQUIRED' ELSE 'INTERPRETED' END\n  FROM approval_created WHERE $7='changes_requested' RETURNING change_request_id\n), content_updated AS (\n  UPDATE social_media.content_items SET\n    status=CASE WHEN $7='approved' THEN 'APPROVED' WHEN $7='changes_requested' THEN 'CHANGES_REQUESTED' ELSE status END,\n    approval_status=CASE WHEN $7='approved' THEN 'APPROVED' WHEN $7='changes_requested' THEN 'PENDING' ELSE approval_status END,\n    approved_at=CASE WHEN $7='approved' THEN now() ELSE approved_at END,\n    approved_by=CASE WHEN $7='approved' THEN $6 ELSE approved_by END,\n    approval_message=CASE WHEN $7='approved' THEN $15 ELSE approval_message END,\n    approved_version_id=CASE WHEN $7='approved' THEN $2::uuid ELSE approved_version_id END, updated_at=now()\n  WHERE content_id=$1 RETURNING client_id\n), interpreted_event AS (\n  INSERT INTO social_media.events (correlation_id,client_id,content_id,event_type,workflow_name,details)\n  SELECT $16::uuid,$3,$1,'APPROVAL_INTERPRETED','06 - Resposta de Aprovacao e Alteracao',jsonb_build_object('version_id',$2,'decision',$7,'structured_decision',$8::jsonb,'provider',$9,'model',$10,'response_id',$12,'cost_estimate_usd',$14::numeric) RETURNING event_id\n), outcome_event AS (\n  INSERT INTO social_media.events (correlation_id,client_id,content_id,event_type,workflow_name,details)\n  SELECT $16::uuid,$3,$1,$17,'06 - Resposta de Aprovacao e Alteracao',jsonb_build_object('version_id',$2,'approval_id',(SELECT approval_id FROM approval_created),'change_request_id',(SELECT change_request_id FROM change_created),'message',$15,'requires_image_regeneration',COALESCE((($8::jsonb)->>'requires_image_regeneration')::boolean,false)) RETURNING event_id\n), outbound AS (\n  INSERT INTO social_media.messages (client_id,channel,direction,sender_id,body,raw_payload,correlation_id)\n  VALUES ($3,$5,'OUTBOUND','system',$18,jsonb_build_object('content_id',$1,'version_id',$2,'decision',$7),$16::uuid) RETURNING message_id\n)\nSELECT $1::text AS content_id,$2::uuid AS version_id,$19::text AS version_label,$7::text AS decision,$8::jsonb AS structured_decision,$9::text AS provider,$10::text AS model,$12::text AS response_id,$13::jsonb AS usage,$14::numeric AS cost_estimate_usd,(SELECT approval_id FROM approval_created) AS approval_id,(SELECT change_request_id FROM change_created) AS change_request_id,$18::text AS automatic_response,$17::text AS event_type,true AS persisted;", "options": {"queryReplacement": "={{ [$json.content_id,$json.current_version_id,$json.content_client_id,$json.message_id,$json.channel,$json.sender_id,$json.structured_decision.decision,JSON.stringify($json.structured_decision),$json.interpretation_provider,$json.interpretation_model,$json.interpretation_prompt,$json.interpretation_response_id,JSON.stringify($json.interpretation_usage||{}),$json.interpretation_cost,$json.message,$json.correlation_id,$json.outcome_event,$json.automatic_response,$json.version_label] }}"}},
+      "id": "e3c534e0-d519-4314-b19d-cb1dc8777252", "name": "Persistir Decisao e Auditoria", "type": "n8n-nodes-base.postgres", "typeVersion": 2.7, "position": [840, -80], "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "c3c98d6a-5edc-42b8-a098-8d14b95e7c04", "leftValue": "={{ $json.decision === 'changes_requested' && !$json.structured_decision.requires_image_regeneration }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}], "combinator": "and"}, "options": {}},
+      "id": "75dd9e60-1929-41a5-9eec-7c44d5fc27fb",
+      "name": "Revisao Automatica?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1060, -80]
+    },
+    {
+      "parameters": {"workflowId": {"__rl": true, "value": "phase61RevisionOrchestrator", "mode": "id"}, "options": {}},
+      "id": "5d3cff28-fcb0-4d49-8fb5-bc215cb7b236",
+      "name": "06.1 - Executar Revisao",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [1280, -160]
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "cb3be49c-b91f-48ae-896a-84cce525a60f", "leftValue": "={{ $json.decision }}", "rightValue": "rejected", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}, "options": {}},
+      "id": "85690dd9-9567-4167-b30b-5bab17e6700c",
+      "name": "Conteudo Rejeitado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1280, 40]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "UPDATE social_media.content_items SET status='REJECTED',approval_status='REJECTED',approval_message=$2,updated_at=now() WHERE content_id=$1 RETURNING $1::text AS content_id,$3::uuid AS version_id,'rejected'::text AS decision,'REJECTED'::text AS status,$4::text AS automatic_response,true AS persisted;", "options": {"queryReplacement": "={{ [$json.content_id,$json.structured_decision ? $('Carregar Estado e Persistir Entrada').first().json.message : '',$json.version_id,$json.automatic_response] }}"}},
+      "id": "27f36537-26a7-41c0-9028-3bbe4febced7",
+      "name": "Finalizar Rejeicao",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [1500, 0],
+      "credentials": {"postgres": {"id": "socialMediaPostgres", "name": "Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"conditions":{"options":{"caseSensitive":false,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"7c000001-0000-4000-8000-000000000001","leftValue":"={{ $json.decision === 'approved' && /(agend|sexta|segunda|quarta|amanh|pr.{0,6}xim.*hor.{0,6}rio|\\d{1,2}h)/i.test($('Carregar Estado e Persistir Entrada').first().json.message) }}","rightValue":true,"operator":{"type":"boolean","operation":"true","singleValue":true}}],"combinator":"and"},"options":{}},
+      "id":"7c000001-0000-4000-8000-000000000002","name":"Aprovacao Inclui Agenda?","type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1500,100]
+    },
+    {
+      "parameters":{"method":"POST","url":"http://localhost:5678/webhook/demo/schedule-command","sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{ JSON.stringify({channel:$('Carregar Estado e Persistir Entrada').first().json.channel,sender_id:$('Carregar Estado e Persistir Entrada').first().json.sender_id,content_id:$json.content_id,message:$('Carregar Estado e Persistir Entrada').first().json.message,external_message_id:'approval-schedule-'+$json.approval_id,source:'approval',version_id:$json.version_id}) }}","options":{"timeout":30000}},
+      "id":"7c000001-0000-4000-8000-000000000003","name":"Agendar Apos Aprovacao","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1720,100]
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{ $json }}", "options": {"responseCode": 200}},
+      "id": "d9e824c1-6dd2-4d24-907c-e5ce0cb53a49", "name": "Responder Aprovacao", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1080, -80]
+    }
+  ],
+  "connections": {
+    "Webhook Aprovacao": {"main": [[{"node": "Normalizar Resposta", "type": "main", "index": 0}]]},
+    "Normalizar Resposta": {"main": [[{"node": "Verificar Duplicidade", "type": "main", "index": 0}]]},
+    "Verificar Duplicidade": {"main": [[{"node": "Mensagem Duplicada?", "type": "main", "index": 0}]]},
+    "Mensagem Duplicada?": {"main": [[{"node": "Revisao Pendente Recuperavel?", "type": "main", "index": 0}], [{"node": "Carregar Estado e Persistir Entrada", "type": "main", "index": 0}]]},
+    "Revisao Pendente Recuperavel?": {"main": [[{"node": "Retomar Revisao Persistida", "type": "main", "index": 0}], [{"node": "Responder Duplicidade", "type": "main", "index": 0}]]},
+    "Retomar Revisao Persistida": {"main": [[{"node": "06.1 - Executar Revisao", "type": "main", "index": 0}]]},
+    "Carregar Estado e Persistir Entrada": {"main": [[{"node": "Estado Compativel?", "type": "main", "index": 0}]]},
+    "Estado Compativel?": {"main": [[{"node": "Provider Aprovacao OpenAI?", "type": "main", "index": 0}], [{"node": "Registrar Estado Invalido", "type": "main", "index": 0}]]},
+    "Registrar Estado Invalido": {"main": [[{"node": "Responder Estado Invalido", "type": "main", "index": 0}]]},
+    "Provider Aprovacao OpenAI?": {"main": [[{"node": "Montar Requisicao Aprovacao", "type": "main", "index": 0}], [{"node": "Provider Aprovacao Mock", "type": "main", "index": 0}]]},
+    "Montar Requisicao Aprovacao": {"main": [[{"node": "OpenAI Approval Responses", "type": "main", "index": 0}]]},
+    "OpenAI Approval Responses": {"main": [[{"node": "Interpretar Aprovacao OpenAI", "type": "main", "index": 0}]]},
+    "Interpretar Aprovacao OpenAI": {"main": [[{"node": "Validar Alteracoes Declarativas", "type": "main", "index": 0}]]},
+    "Provider Aprovacao Mock": {"main": [[{"node": "Validar Alteracoes Declarativas", "type": "main", "index": 0}]]},
+    "Validar Alteracoes Declarativas": {"main": [[{"node": "Persistir Decisao e Auditoria", "type": "main", "index": 0}]]},
+    "Persistir Decisao e Auditoria": {"main": [[{"node": "Revisao Automatica?", "type": "main", "index": 0}]]},
+    "Revisao Automatica?": {"main": [[{"node": "06.1 - Executar Revisao", "type": "main", "index": 0}], [{"node": "Conteudo Rejeitado?", "type": "main", "index": 0}]]},
+    "06.1 - Executar Revisao": {"main": [[{"node": "Responder Aprovacao", "type": "main", "index": 0}]]},
+    "Conteudo Rejeitado?": {"main": [[{"node": "Finalizar Rejeicao", "type": "main", "index": 0}], [{"node": "Aprovacao Inclui Agenda?", "type": "main", "index": 0}]]},
+    "Aprovacao Inclui Agenda?": {"main": [[{"node":"Agendar Apos Aprovacao","type":"main","index":0}], [{"node":"Responder Aprovacao","type":"main","index":0}]]},
+    "Agendar Apos Aprovacao": {"main": [[{"node":"Responder Aprovacao","type":"main","index":0}]]},
+    "Finalizar Rejeicao": {"main": [[{"node": "Responder Aprovacao", "type": "main", "index": 0}]]}
+  },
+  "pinData": {}, "tags": []
+}

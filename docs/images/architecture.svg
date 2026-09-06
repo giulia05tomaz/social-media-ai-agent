@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Arquitetura do AI Social Media Agent</title>
+  <desc id="desc">Componentes do pedido inicial até a publicação no Instagram.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#09090b"/><stop offset="1" stop-color="#27272a"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#a1a1aa"/></marker>
+    <style>.box{fill:#18181b;stroke:#52525b;stroke-width:2}.label{fill:#fafafa;font:700 24px Arial,sans-serif}.small{fill:#a1a1aa;font:18px Arial,sans-serif}.line{stroke:#a1a1aa;stroke-width:3;fill:none;marker-end:url(#arrow)}</style>
+  </defs>
+  <rect width="1600" height="900" rx="28" fill="url(#bg)"/>
+  <text x="80" y="82" fill="#fafafa" font-family="Arial,sans-serif" font-size="38" font-weight="700">Arquitetura ponta a ponta</text>
+  <text x="80" y="120" fill="#a1a1aa" font-family="Arial,sans-serif" font-size="20">Orquestração, persistência, renderização e distribuição com controles de segurança</text>
+  <g>
+    <rect class="box" x="70" y="205" width="220" height="112" rx="20"/><text class="label" x="180" y="255" text-anchor="middle">Pedido</text><text class="small" x="180" y="286" text-anchor="middle">mensagem do cliente</text>
+    <path class="line" d="M290 261h75"/>
+    <rect class="box" x="385" y="205" width="220" height="112" rx="20"/><text class="label" x="495" y="255" text-anchor="middle">n8n</text><text class="small" x="495" y="286" text-anchor="middle">orquestração</text>
+    <path class="line" d="M605 261h75"/>
+    <rect class="box" x="700" y="205" width="220" height="112" rx="20"/><text class="label" x="810" y="255" text-anchor="middle">OpenAI</text><text class="small" x="810" y="286" text-anchor="middle">texto + imagem</text>
+    <path class="line" d="M920 261h75"/>
+    <rect class="box" x="1015" y="205" width="220" height="112" rx="20"/><text class="label" x="1125" y="255" text-anchor="middle">PostgreSQL</text><text class="small" x="1125" y="286" text-anchor="middle">estado + auditoria</text>
+    <path class="line" d="M1235 261h75"/>
+    <rect class="box" x="1330" y="205" width="200" height="112" rx="20"/><text class="label" x="1430" y="255" text-anchor="middle">Renderer</text><text class="small" x="1430" y="286" text-anchor="middle">arte determinística</text>
+    <path class="line" d="M1430 317v95"/>
+    <rect class="box" x="1305" y="432" width="250" height="112" rx="20"/><text class="label" x="1430" y="480" text-anchor="middle">Revisão</text><text class="small" x="1430" y="512" text-anchor="middle">versões + aprovação</text>
+    <path class="line" d="M1305 488h-85"/>
+    <rect class="box" x="970" y="432" width="230" height="112" rx="20"/><text class="label" x="1085" y="480" text-anchor="middle">Scheduler</text><text class="small" x="1085" y="512" text-anchor="middle">timezone + fila</text>
+    <path class="line" d="M970 488h-85"/>
+    <rect class="box" x="635" y="432" width="230" height="112" rx="20"/><text class="label" x="750" y="480" text-anchor="middle">Cloudflare R2</text><text class="small" x="750" y="512" text-anchor="middle">mídia pública HTTPS</text>
+    <path class="line" d="M635 488h-85"/>
+    <rect class="box" x="300" y="432" width="230" height="112" rx="20"/><text class="label" x="415" y="480" text-anchor="middle">Buffer</text><text class="small" x="415" y="512" text-anchor="middle">distribuição social</text>
+    <path class="line" d="M300 488h-85"/>
+    <rect x="65" y="432" width="130" height="112" rx="20" fill="#fafafa"/><text x="130" y="480" text-anchor="middle" fill="#09090b" font-family="Arial,sans-serif" font-size="23" font-weight="700">Instagram</text><text x="130" y="512" text-anchor="middle" fill="#3f3f46" font-family="Arial,sans-serif" font-size="18">validado</text>
+  </g>
+  <g transform="translate(80 650)">
+    <rect width="1440" height="150" rx="22" fill="#18181b" stroke="#3f3f46"/>
+    <text x="38" y="46" fill="#fafafa" font-family="Arial,sans-serif" font-size="22" font-weight="700">Controles transversais</text>
+    <g fill="#a1a1aa" font-family="Arial,sans-serif" font-size="19">
+      <text x="38" y="92">Idempotência</text><text x="225" y="92">Cross-client guards</text><text x="465" y="92">Checksums</text><text x="630" y="92">Dry-run</text><text x="770" y="92">Aprovação explícita</text><text x="1015" y="92">Auditoria por eventos</text><text x="1260" y="92">Providers</text>
+    </g>
+  </g>
+</svg>

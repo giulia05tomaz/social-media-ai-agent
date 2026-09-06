@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApprovalDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "confidence", "requires_image_regeneration", "changes", "clarification_message"],
+  "properties": {
+    "decision": {"type": "string", "enum": ["approved", "changes_requested", "rejected", "unclear"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "requires_image_regeneration": {"type": "boolean"},
+    "changes": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "operation", "value"],
+        "properties": {
+          "target": {"type": "string", "enum": ["product_image", "headline", "subtitle", "cta", "logo", "background"]},
+          "operation": {"type": "string", "enum": ["scale", "move", "replace_text", "change_color"]},
+          "value": {
+            "anyOf": [
+              {"type": "number"},
+              {"type": "string"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["direction", "amount"],
+                "properties": {
+                  "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+                  "amount": {"type": "number", "minimum": 1, "maximum": 120}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "clarification_message": {"type": ["string", "null"]}
+  }
+}

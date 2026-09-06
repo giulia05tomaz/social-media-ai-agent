@@ -1,0 +1,14 @@
+{
+  "name":"08.1 - Publisher - Ready Content",
+  "id":"phase831PublisherWorker",
+  "active":false,
+  "settings":{"executionOrder":"v1"},
+  "nodes":[
+    {"parameters":{"rule":{"interval":[{"field":"minutes","minutesInterval":1}]}},"id":"p831w-cron","name":"A Cada Minuto","type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[0,0]},
+    {"parameters":{"operation":"executeQuery","query":"SELECT j.schedule_id::text,s.client_id,s.content_id,j.version_id::text,s.platform FROM social_media.publication_jobs j JOIN social_media.content_schedule s ON s.id=j.schedule_id WHERE (SELECT config_value FROM social_media.runtime_config WHERE config_key='publication_worker_enabled')='true' AND j.release_status='RELEASED' AND j.publication_authorized_at IS NOT NULL AND s.status='READY_TO_PUBLISH' AND j.status IN ('QUEUED','DRY_RUN_READY') ORDER BY j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED;","options":{}},"id":"p831w-claim","name":"Claim Somente Liberado","type":"n8n-nodes-base.postgres","typeVersion":2.6,"position":[240,0],"credentials":{"postgres":{"id":"socialMediaPostgres","name":"Social Media PostgreSQL"}}},
+    {"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict"},"conditions":[{"id":"p831w-has","leftValue":"={{ Boolean($json.schedule_id) }}","rightValue":true,"operator":{"type":"boolean","operation":"true","singleValue":true}}],"combinator":"and"}},"id":"p831w-if","name":"Item Liberado?","type":"n8n-nodes-base.if","typeVersion":2,"position":[480,0]},
+    {"parameters":{"method":"POST","url":"http://publication-service:8000/prepare-publication","authentication":"genericCredentialType","genericAuthType":"httpHeaderAuth","sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{ JSON.stringify({schedule_id:$json.schedule_id,client_id:$json.client_id,content_id:$json.content_id,version_id:$json.version_id,platform:$json.platform}) }}","options":{"timeout":120000}},"id":"p831w-service","name":"Acionar Orquestrador Interno","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[720,-100],"credentials":{"httpHeaderAuth":{"id":"mediaDeliveryHeaderAuth","name":"Media Delivery Internal Key (env)"}}}
+  ],
+  "connections":{"A Cada Minuto":{"main":[[{"node":"Claim Somente Liberado","type":"main","index":0}]]},"Claim Somente Liberado":{"main":[[{"node":"Item Liberado?","type":"main","index":0}]]},"Item Liberado?":{"main":[[{"node":"Acionar Orquestrador Interno","type":"main","index":0}],[]]}},
+  "pinData":{},"tags":[]
+}

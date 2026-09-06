@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="360" viewBox="0 0 1600 360" role="img" aria-labelledby="title desc">
+  <title id="title">Pipeline de conteúdo</title><desc id="desc">Pedido, briefing, copy, imagem, arte, revisão, aprovação, agenda e publicação.</desc>
+  <defs><linearGradient id="bg" x1="0" x2="1"><stop stop-color="#09090b"/><stop offset="1" stop-color="#27272a"/></linearGradient><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="#71717a"/></marker><style>.n{fill:#18181b;stroke:#52525b;stroke-width:2}.t{fill:#fafafa;font:700 18px Arial,sans-serif}.l{stroke:#71717a;stroke-width:3;marker-end:url(#a)}</style></defs>
+  <rect width="1600" height="360" rx="28" fill="url(#bg)"/><text x="72" y="78" fill="#fafafa" font-family="Arial,sans-serif" font-size="34" font-weight="700">Pipeline de criação e publicação</text>
+  <g transform="translate(70 145)">
+    <rect class="n" width="130" height="72" rx="18"/><text class="t" x="65" y="44" text-anchor="middle">Pedido</text><path class="l" d="M130 36h32"/>
+    <rect class="n" x="180" width="130" height="72" rx="18"/><text class="t" x="245" y="44" text-anchor="middle">Briefing</text><path class="l" d="M310 36h32"/>
+    <rect class="n" x="360" width="130" height="72" rx="18"/><text class="t" x="425" y="44" text-anchor="middle">Copy</text><path class="l" d="M490 36h32"/>
+    <rect class="n" x="540" width="130" height="72" rx="18"/><text class="t" x="605" y="44" text-anchor="middle">Imagem</text><path class="l" d="M670 36h32"/>
+    <rect class="n" x="720" width="130" height="72" rx="18"/><text class="t" x="785" y="44" text-anchor="middle">Arte</text><path class="l" d="M850 36h32"/>
+    <rect class="n" x="900" width="130" height="72" rx="18"/><text class="t" x="965" y="44" text-anchor="middle">Revisão</text><path class="l" d="M1030 36h32"/>
+    <rect class="n" x="1080" width="140" height="72" rx="18"/><text class="t" x="1150" y="44" text-anchor="middle">Aprovação</text><path class="l" d="M1220 36h32"/>
+    <rect x="1270" width="180" height="72" rx="18" fill="#fafafa"/><text x="1360" y="44" text-anchor="middle" fill="#09090b" font-family="Arial,sans-serif" font-size="18" font-weight="700">Publicação</text>
+  </g>
+  <text x="72" y="290" fill="#a1a1aa" font-family="Arial,sans-serif" font-size="20">Cada etapa mantém contexto de marca, estado persistido e trilha de auditoria.</text>
+</svg>

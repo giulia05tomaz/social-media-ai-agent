@@ -1,0 +1,110 @@
+{
+  "id": "socialMediaPhase3AIProvider",
+  "name": "03 - Provider IA e Conteudo Estruturado",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {"inputSource": "passthrough"},
+      "id": "ba6f39e1-54f5-4651-b69c-a3f6a6771e7c",
+      "name": "Entrada Fase 3",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-560, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "strict", "version": 2},
+          "conditions": [
+            {
+              "id": "715fa4bb-40c2-4f01-b5e4-b415ee9183c9",
+              "leftValue": "={{ $json.ai_provider }}",
+              "rightValue": "openai",
+              "operator": {"type": "string", "operation": "equals"}
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6a651a50-dbcf-4516-aed9-a4affb4ed857",
+      "name": "Provider OpenAI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-340, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json;\nif (input.ai_provider === 'precomputed') {\n  let replay;\n  try { replay = JSON.parse(input.ai_model); } catch (error) { throw new Error('Replay de IA invalido: ai_model deve conter JSON autenticado.'); }\n  if (!replay?.structured_output || !replay?.response_id || !replay?.model) throw new Error('Replay de IA incompleto: structured_output, response_id e model sao obrigatorios.');\n  return [{json:{...input,ai_provider:'openai',ai_model:replay.model,ai_effective_model:replay.model,ai_response_id:replay.response_id,ai_usage:replay.usage||{},ai_cost_estimate:Number(replay.cost_estimate_usd||0),ai_replayed:true,structured_output:replay.structured_output}}];\n}\nconst text = String(input.message || '');\nconst normalized = text.toLocaleLowerCase('pt-BR');\nconst product = /automacao/i.test(normalized) ? 'automacao inteligente' : null;\nconst structured = {\n  schema_version: '1.0',\n  intent: {\n    name: /(arte|post|conte[uú]do)/i.test(normalized) ? 'create_social_media_art' : 'unknown',\n    confidence: 1,\n    raw_request: text,\n    objective: 'divulgacao de servico',\n    product,\n    format: 'social_media_post',\n    content_type: 'feed',\n    brand_identity_required: /(cores? da (nossa|minha) marca|identidade visual)/i.test(normalized)\n  },\n  automatic_response: 'Recebi o pedido e vou preparar o conteúdo seguindo a identidade visual da marca.',\n  briefing: {\n    client_id: input.client_id,\n    objective: 'divulgacao de servico',\n    product,\n    content_type: 'feed',\n    visual_style: 'premium e tecnologico',\n    brand_identity: true,\n    requires_generated_image: true,\n    status: 'briefing_created',\n    elements: ['elemento visual em destaque', 'logo fornecido pela marca', 'texto curto', 'CTA'],\n    observations: ['nao inventar metricas', 'nao inventar informacoes sobre o servico', 'usar apenas cores oficiais quando forem cadastradas']\n  },\n  content: {\n    title: 'Automação que transforma',\n    subtitle: 'Automacao inteligente em destaque',\n    cta: 'Conheça a solução',\n    caption: 'Automação e inteligência artificial podem transformar o fluxo de social media, do briefing à publicação. Conheça a solução.',\n    hashtags: ['#WebTech', '#InteligenciaArtificial', '#InteligenciaArtificial', '#Automacao'],\n    visual_description: 'Composição tecnológica abstrata, profissional e monocromática, com espaço negativo para headline e CTA. A identidade visual é aplicada pelo renderer.',\n    image_prompt: 'Visual tecnológico abstrato em preto, branco e cinza, conexões digitais e fluxo de automação, enquadramento quadrado, composição limpa, espaço negativo para texto. Não inserir logo, palavras, telefone ou endereço.',\n    assembly_instructions: ['usar canvas 1080x1080', 'posicionar o elemento visual como apoio à mensagem', 'aplicar logo somente a partir do arquivo cadastrado', 'reservar area legivel para titulo e CTA', 'nao inserir informacao nao fornecida']\n  }\n};\nreturn [{ json: { ...input, structured_output: structured } }];"
+      },
+      "id": "2420b014-f59b-42ea-9fd6-b9134e0cb680",
+      "name": "Provider Mock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-100, 150]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json;\nconst schema = {type:'object',additionalProperties:false,required:['schema_version','intent','automatic_response','briefing','content'],properties:{schema_version:{type:'string'},intent:{type:'object',additionalProperties:false,required:['name','confidence','raw_request','objective','product','format','content_type','brand_identity_required'],properties:{name:{type:'string',enum:['create_social_media_art','unknown']},confidence:{type:'number'},raw_request:{type:'string'},objective:{type:'string'},product:{type:['string','null']},format:{type:'string'},content_type:{type:'string'},brand_identity_required:{type:'boolean'}}},automatic_response:{type:'string'},briefing:{type:'object',additionalProperties:false,required:['client_id','objective','product','content_type','visual_style','brand_identity','requires_generated_image','status','elements','observations'],properties:{client_id:{type:'string'},objective:{type:'string'},product:{type:['string','null']},content_type:{type:'string'},visual_style:{type:'string'},brand_identity:{type:'boolean'},requires_generated_image:{type:'boolean'},status:{type:'string'},elements:{type:'array',items:{type:'string'}},observations:{type:'array',items:{type:'string'}}}},content:{type:'object',additionalProperties:false,required:['title','subtitle','cta','caption','hashtags','visual_description','image_prompt','assembly_instructions'],properties:{title:{type:'string'},subtitle:{type:'string'},cta:{type:'string'},caption:{type:'string'},hashtags:{type:'array',items:{type:'string'}},visual_description:{type:'string'},image_prompt:{type:'string'},assembly_instructions:{type:'array',items:{type:'string'}}}}}};\nconst instructions = 'Você é um agente de social media. Responda somente no schema solicitado. Não invente preços, produtos, cores, fontes, logo, endereço ou informações ausentes. A resposta automática deve ser curta em português do Brasil.';\nconst prompt = JSON.stringify({request:input.message,brand_profile:input.brand_profile});\nconst model = !input.ai_model || input.ai_model === 'mock-v1' ? 'gpt-5-mini' : input.ai_model;\nreturn [{json:{...input,ai_model:model,openai_request:{model,store:false,instructions,input:prompt,text:{format:{type:'json_schema',name:'social_media_content',strict:true,schema},verbosity:'low'}}}}];"
+      },
+      "id": "d45d8290-d9e7-498f-bf3b-0b7a90ab2d37",
+      "name": "Montar Requisicao OpenAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-100, -150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.openai_request) }}",
+        "options": {"timeout": 60000}
+      },
+      "id": "18c0713a-94d0-4485-b100-c60a57e8092d",
+      "name": "OpenAI Responses API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [130, -150],
+      "credentials": {
+        "httpHeaderAuth": {"id": "openAiHeaderAuth", "name": "OpenAI API Key (env)"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst context = $('Montar Requisicao OpenAI').first().json;\nconst text = response.output_text || (response.output || []).flatMap(item => item.content || []).find(item => item.type === 'output_text')?.text;\nif (!text) throw new Error('A OpenAI nao retornou output_text.');\nconst usage = response.usage || {};\nconst inputTokens = Number(usage.input_tokens || 0);\nconst cachedTokens = Number(usage.input_tokens_details?.cached_tokens || 0);\nconst outputTokens = Number(usage.output_tokens || 0);\nconst aiCostEstimate = ((inputTokens - cachedTokens) * 0.25 + cachedTokens * 0.025 + outputTokens * 2) / 1000000;\nreturn [{json:{...context,structured_output:JSON.parse(text),ai_response_id:response.id,ai_usage:usage,ai_effective_model:response.model || context.ai_model,ai_cost_estimate:aiCostEstimate}}];"
+      },
+      "id": "13cb4d05-b8bf-4c11-b419-874e97a2a05a",
+      "name": "Interpretar Resposta OpenAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, -150]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json;\nconst value = input.structured_output;\nconst required = ['schema_version','intent','automatic_response','briefing','content'];\nfor (const key of required) if (value?.[key] === undefined) throw new Error(`Structured Output invalido: campo ${key} ausente.`);\nconst intentRequired = ['name','confidence','raw_request','objective','product','format','content_type','brand_identity_required'];\nfor (const key of intentRequired) if (value.intent?.[key] === undefined) throw new Error(`Structured Output invalido: intent.${key} ausente.`);\nconst briefingRequired = ['client_id','objective','product','content_type','visual_style','brand_identity','requires_generated_image','status','elements','observations'];\nfor (const key of briefingRequired) if (value.briefing?.[key] === undefined) throw new Error(`Structured Output invalido: briefing.${key} ausente.`);\nconst contentRequired = ['title','subtitle','cta','caption','hashtags','visual_description','image_prompt','assembly_instructions'];\nfor (const key of contentRequired) if (value.content?.[key] === undefined) throw new Error(`Structured Output invalido: content.${key} ausente.`);\nif (!Array.isArray(value.content.hashtags) || !Array.isArray(value.content.assembly_instructions)) throw new Error('Structured Output invalido: arrays esperados.');\nreturn [{json:{...input,structured_output:value,structured_output_valid:true}}];"
+      },
+      "id": "7ed92438-4a4f-4456-b68e-4d98cc5d0f73",
+      "name": "Validar Structured Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 0]
+    }
+  ],
+  "connections": {
+    "Entrada Fase 3": {"main": [[{"node": "Provider OpenAI?", "type": "main", "index": 0}]]},
+    "Provider OpenAI?": {"main": [[{"node": "Montar Requisicao OpenAI", "type": "main", "index": 0}], [{"node": "Provider Mock", "type": "main", "index": 0}]]},
+    "Montar Requisicao OpenAI": {"main": [[{"node": "OpenAI Responses API", "type": "main", "index": 0}]]},
+    "OpenAI Responses API": {"main": [[{"node": "Interpretar Resposta OpenAI", "type": "main", "index": 0}]]},
+    "Interpretar Resposta OpenAI": {"main": [[{"node": "Validar Structured Output", "type": "main", "index": 0}]]},
+    "Provider Mock": {"main": [[{"node": "Validar Structured Output", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1", "timezone": "America/Sao_Paulo", "callerPolicy": "workflowsFromSameOwner"},
+  "versionId": "1180b4d7-4fd0-4059-acdf-860fb44b57c9",
+  "meta": {"templateCredsSetupCompleted": true},
+  "tags": []
+}

@@ -1,0 +1,51 @@
+{
+  "name": "07.1 - Worker Recorrente da Agenda",
+  "nodes": [
+    {
+      "parameters": {"rule":{"interval":[{"field":"minutes","minutesInterval":1}]}},
+      "id": "7b000001-0000-4000-8000-000000000001",
+      "name": "A Cada Minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"SELECT s.id::text AS schedule_id,s.content_id,s.version_id::text,s.scheduled_at,s.timezone,c.client_id,c.approval_status,c.approved_version_id::text,v.final_art_path,COALESCE((SELECT config_value::int FROM social_media.runtime_config WHERE config_key='schedule_late_tolerance_minutes'),30) AS tolerance_minutes FROM social_media.content_schedule s JOIN social_media.content_items c ON c.content_id=s.content_id LEFT JOIN social_media.content_versions v ON v.id=s.version_id WHERE s.status='SCHEDULED' AND s.scheduled_at<=now() ORDER BY s.scheduled_at FOR UPDATE OF s SKIP LOCKED;","options":{}},
+      "id": "7b000001-0000-4000-8000-000000000002",
+      "name": "Carregar Itens Vencidos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-300, 0],
+      "alwaysOutputData": false,
+      "credentials": {"postgres":{"id":"socialMediaPostgres","name":"Social Media PostgreSQL"}}
+    },
+    {
+      "parameters": {"jsCode":"const fs=require('fs');return $input.all().map(({json:x})=>{const approvalOk=x.approval_status==='APPROVED'&&x.approved_version_id===x.version_id;const file='/data/'+String(x.final_art_path||'').replace(/^\\/+/, '');const artOk=Boolean(x.final_art_path)&&fs.existsSync(file)&&fs.statSync(file).size>0;const ageMinutes=(Date.now()-new Date(x.scheduled_at).getTime())/60000;let target='READY_TO_PUBLISH',reason=null;if(!approvalOk){target='FAILED';reason='APPROVAL_OR_VERSION_INVALID';}else if(!artOk){target='FAILED';reason='FINAL_ART_MISSING';}else if(ageMinutes>Number(x.tolerance_minutes)){target='MISSED';reason='LATE_TOLERANCE_EXCEEDED';}return {json:{...x,target_status:target,failure_reason:reason,art_exists:artOk,approval_valid:approvalOk,age_minutes:ageMinutes}};});"},
+      "id": "7b000001-0000-4000-8000-000000000003",
+      "name": "Validar Arte Versao e Tolerancia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-70, 0]
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"WITH changed AS (UPDATE social_media.content_schedule SET status=$2,failure_reason=$3,updated_at=now(),metadata=metadata||$4::jsonb WHERE id=$1::uuid AND status='SCHEDULED' RETURNING *), content_changed AS (UPDATE social_media.content_items c SET status=$2,updated_at=now() FROM changed s WHERE c.content_id=s.content_id AND c.approved_version_id=s.version_id RETURNING c.content_id), history AS (INSERT INTO social_media.schedule_history(schedule_id,content_id,version_id,action,old_scheduled_at,new_scheduled_at,old_status,new_status,reason,details) SELECT id,content_id,version_id,$2,scheduled_at,scheduled_at,'SCHEDULED',$2,$3,$4::jsonb FROM changed RETURNING history_id), audit AS (INSERT INTO social_media.events(client_id,content_id,event_type,workflow_name,severity,details) SELECT client_id,content_id,CASE WHEN $2='READY_TO_PUBLISH' THEN 'CONTENT_READY_TO_PUBLISH' WHEN $2='MISSED' THEN 'SCHEDULE_MISSED' ELSE 'SCHEDULE_VALIDATION_FAILED' END,'07.1 - Worker Recorrente da Agenda',CASE WHEN $2='READY_TO_PUBLISH' THEN 'INFO' ELSE 'WARN' END,jsonb_build_object('schedule_id',id,'version_id',version_id,'scheduled_at',scheduled_at,'status',$2,'reason',$3,'validation',$4::jsonb) FROM changed RETURNING event_id) SELECT id::text AS schedule_id,content_id,version_id::text,scheduled_at,status,failure_reason,(SELECT history_id FROM history) AS history_id,(SELECT event_id FROM audit) AS event_id FROM changed;","options":{"queryReplacement":"={{ [$json.schedule_id,$json.target_status,$json.failure_reason,JSON.stringify({art_exists:$json.art_exists,approval_valid:$json.approval_valid,age_minutes:$json.age_minutes,tolerance_minutes:$json.tolerance_minutes,demo_mode:true,live_mode:false})] }}"}},
+      "id": "7b000001-0000-4000-8000-000000000004",
+      "name": "Avancar Estado Idempotente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [170, 0],
+      "credentials": {"postgres":{"id":"socialMediaPostgres","name":"Social Media PostgreSQL"}}
+    }
+  ],
+  "connections": {
+    "A Cada Minuto":{"main":[[{"node":"Carregar Itens Vencidos","type":"main","index":0}]]},
+    "Carregar Itens Vencidos":{"main":[[{"node":"Validar Arte Versao e Tolerancia","type":"main","index":0}]]},
+    "Validar Arte Versao e Tolerancia":{"main":[[{"node":"Avancar Estado Idempotente","type":"main","index":0}]]}
+  },
+  "active": false,
+  "settings": {"executionOrder":"v1"},
+  "versionId": "7b000001-0000-4000-8000-000000000099",
+  "meta": {"templateCredsSetupCompleted":true},
+  "id": "phase7SchedulerWorker",
+  "tags": []
+}

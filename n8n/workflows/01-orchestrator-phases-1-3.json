@@ -1,0 +1,170 @@
+{
+  "id": "socialMediaPhases123Orchestrator",
+  "name": "01 - Orquestrador - Entrada ate Conteudo",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/content-requests",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d56e4d1e-7c4b-4ce0-9acc-66afae6d4f72",
+      "name": "Webhook Demo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-940, 0],
+      "webhookId": "a83f2964-d8b3-4942-955b-7cb91b919a49"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body ?? $json;\nconst text = String(input.message ?? input.text ?? '').trim();\nif (!text) throw new Error('O campo message e obrigatorio.');\nconst uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });\nconst correlationId = input.correlation_id || uuid();\nreturn [{ json: { correlation_id: correlationId, external_message_id: input.external_message_id || correlationId, channel: String(input.channel || 'webhook'), sender_id: String(input.sender_id || 'demo-user'), requested_client_id: input.client_id ? String(input.client_id) : null, message: text, raw_payload: input, demo_mode: true, live_mode: false } }];"
+      },
+      "id": "46c22585-d6b5-4387-bd9c-c2f4d932adbb",
+      "name": "Normalizar Entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH existing_message AS (SELECT * FROM social_media.messages WHERE channel=$1 AND external_message_id=$2 LIMIT 1), inserted_message AS (INSERT INTO social_media.messages(correlation_id,channel,external_message_id,direction,sender_id,body,raw_payload) SELECT $6::uuid,$1,$2,'INBOUND',$3,$4,$5::jsonb WHERE NOT EXISTS(SELECT 1 FROM existing_message) RETURNING *), selected_message AS (SELECT * FROM inserted_message UNION ALL SELECT * FROM existing_message WHERE NOT EXISTS(SELECT 1 FROM inserted_message)), inserted_event AS (INSERT INTO social_media.events(correlation_id,client_id,event_type,workflow_name,details) SELECT m.correlation_id,NULL,'MESSAGE_RECEIVED','01 - Orquestrador - Entrada ate Conteudo',jsonb_build_object('message_id',m.message_id,'channel',m.channel,'sender_id',m.sender_id) FROM inserted_message m RETURNING event_id) SELECT m.message_id,m.correlation_id,m.channel,m.external_message_id,m.sender_id,m.body AS message,m.raw_payload,$7::text AS requested_client_id,true AS demo_mode,false AS live_mode,NOT EXISTS(SELECT 1 FROM inserted_message) AS is_duplicate,(SELECT content_id FROM social_media.content_items WHERE source_message_id=m.message_id ORDER BY created_at LIMIT 1) AS existing_content_id FROM selected_message m;",
+        "options": {
+          "queryReplacement": "={{ [$json.channel, $json.external_message_id, $json.sender_id, $json.message, $json.raw_payload, $json.correlation_id, $json.requested_client_id] }}"
+        }
+      },
+      "id": "70284fb3-bb59-4b99-9d46-1b699611988f",
+      "name": "Persistir Mensagem e Evento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [-500, 0],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2}, "conditions": [{"id": "df82cbf7-e893-43b2-8e09-8a33f4a191bc", "leftValue": "={{ Boolean($json.existing_content_id) }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}], "combinator": "and"}, "options": {}},
+      "id": "890ee00e-83bc-49c0-8240-8ab9cf52df22",
+      "name": "Conteudo Ja Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-300, 0]
+    },
+    {
+      "parameters": {"jsCode": "return [{json:{content_id:$json.existing_content_id,resumed:true,external_message_id:$json.external_message_id}}];"},
+      "id": "a6df3508-bbaa-4c47-a94c-b1419f5396a9",
+      "name": "Retomar Conteudo Existente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, -160]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "socialMediaPhase2ClientIdentity",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "61a5b82a-5bf9-446d-b249-38f04f21a78b",
+      "name": "02 - Identificar Cliente",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [-270, 0]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "socialMediaPhase3AIProvider",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "6f9aab64-b8f1-42f0-885f-225446dd4bba",
+      "name": "03 - IA e Structured Output",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH created AS (\n  INSERT INTO social_media.content_items (\n    client_id, source_message_id, request, briefing, caption, image_prompt,\n    title, subtitle, cta, hashtags, visual_description, assembly_instructions,\n    automatic_response, ai_provider, ai_model, structured_output, status\n  ) VALUES (\n    $1, $2::uuid, $3::jsonb, $4::jsonb, $5, $6,\n    $7, $8, $9, $10::jsonb, $11, $12::jsonb,\n    $15, $13, $14, $16::jsonb, 'BRIEFING_CREATED'\n  )\n  RETURNING *\n), version_created AS (\n  INSERT INTO social_media.content_versions (content_id, version, briefing, copy)\n  SELECT content_id, 1, briefing,\n    jsonb_build_object(\n      'title', title, 'subtitle', subtitle, 'cta', cta,\n      'caption', caption, 'hashtags', hashtags,\n      'visual_description', visual_description,\n      'image_prompt', image_prompt,\n      'assembly_instructions', assembly_instructions\n    )\n  FROM created\n  RETURNING version_label\n), outbound_message AS (\n  INSERT INTO social_media.messages (\n    correlation_id, client_id, channel, direction, sender_id, body, raw_payload\n  )\n  SELECT $19::uuid, $1, $17, 'OUTBOUND', 'social-media-ai-agent', $15,\n         jsonb_build_object('content_id', content_id, 'provider', $13, 'model', $14)\n  FROM created\n  RETURNING message_id\n), operation_created AS (\n  INSERT INTO social_media.external_operations (\n    content_id, operation_type, provider, model, prompt, external_id, cost_estimate, status, response_metadata\n  )\n  SELECT content_id, 'TEXT_GENERATION', $13, $14, $3::text, $20, $22::numeric, 'SUCCESS',\n         jsonb_build_object(\n           'structured_output', true,\n           'usage', $21::jsonb,\n           'pricing_usd_per_million', jsonb_build_object('input', 0.25, 'cached_input', 0.025, 'output', 2.00)\n         )\n  FROM created\n  RETURNING operation_id, external_id, cost_estimate, response_metadata\n), events_created AS (\n  INSERT INTO social_media.events (\n    correlation_id, client_id, content_id, event_type, workflow_name, details\n  )\n  SELECT $19::uuid, $1, c.content_id, e.event_type,\n         '01 - Orquestrador - Entrada ate Conteudo', e.details\n  FROM created c\n  CROSS JOIN (VALUES\n    ('AI_CALLED', jsonb_build_object('provider', $13, 'model', $14, 'response_id', $20, 'usage', $21::jsonb, 'cost_estimate_usd', $22::numeric)),\n    ('INTENT_INTERPRETED', $3::jsonb),\n    ('AUTOMATIC_RESPONSE_CREATED', jsonb_build_object('response', $15)),\n    ('BRIEFING_CREATED', $4::jsonb),\n    ('CONTENT_GENERATED', jsonb_build_object('title', $7, 'version', 1))\n  ) AS e(event_type, details)\n  RETURNING event_id\n)\nSELECT\n  c.content_id, c.client_id, c.source_message_id AS message_id,\n  c.status, c.approval_status, c.title, c.subtitle, c.cta,\n  c.caption, c.hashtags, c.image_prompt, c.visual_description,\n  c.assembly_instructions, c.automatic_response, c.ai_provider, c.ai_model,\n  c.briefing, c.request AS intent, c.structured_output,\n  (SELECT version_label FROM version_created LIMIT 1) AS version_label,\n  (SELECT message_id FROM outbound_message LIMIT 1) AS outbound_message_id,\n  (SELECT external_id FROM operation_created LIMIT 1) AS ai_response_id,\n  (SELECT response_metadata->'usage' FROM operation_created LIMIT 1) AS ai_usage,\n  (SELECT cost_estimate FROM operation_created LIMIT 1) AS ai_cost_estimate_usd,\n  true AS persisted, true AS demo_mode, false AS external_actions_executed\nFROM created c;",
+        "options": {
+          "queryReplacement": "={{ [$json.client_id, $json.message_id, $json.structured_output.intent, $json.structured_output.briefing, $json.structured_output.content.caption, $json.structured_output.content.image_prompt, $json.structured_output.content.title, $json.structured_output.content.subtitle, $json.structured_output.content.cta, JSON.stringify($json.structured_output.content.hashtags), $json.structured_output.content.visual_description, JSON.stringify($json.structured_output.content.assembly_instructions), $json.ai_provider, ($json.ai_effective_model || $json.ai_model), $json.structured_output.automatic_response, $json.structured_output, $json.channel, $json.sender_id, $json.correlation_id, ($json.ai_response_id || null), JSON.stringify($json.ai_usage || {input_tokens:0,output_tokens:0,total_tokens:0}), ($json.ai_cost_estimate !== undefined ? $json.ai_cost_estimate : ($json.ai_provider === 'mock' ? 0 : null))] }}"
+        }
+      },
+      "id": "c165ce03-4016-4bf4-ac78-351a80fa76df",
+      "name": "Persistir Conteudo Completo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [210, 0],
+      "credentials": {
+        "postgres": {
+          "id": "socialMediaPostgres",
+          "name": "Social Media PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {"workflowId": {"__rl": true, "value": "phase4ImageGeneration", "mode": "id"}, "options": {}},
+      "id": "3d21a03c-a6e8-4bcb-a20b-67bf8c0104e0",
+      "name": "04 - Gerar Imagem",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [450, 0]
+    },
+    {
+      "parameters": {"workflowId": {"__rl": true, "value": "phase62InitialRenderOrchestrator", "mode": "id"}, "options": {}},
+      "id": "4c3c2c15-a4e2-4cd5-bff1-e759f5e0fc2a",
+      "name": "05 - Render Inicial",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [680, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "82cf5706-e0bb-47a8-a96d-9fd720483fa3",
+      "name": "Responder Conteudo Criado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [920, 0]
+    }
+  ],
+  "connections": {
+    "Webhook Demo": {"main": [[{"node": "Normalizar Entrada", "type": "main", "index": 0}]]},
+    "Normalizar Entrada": {"main": [[{"node": "Persistir Mensagem e Evento", "type": "main", "index": 0}]]},
+    "Persistir Mensagem e Evento": {"main": [[{"node": "Conteudo Ja Existe?", "type": "main", "index": 0}]]},
+    "Conteudo Ja Existe?": {"main": [[{"node": "Retomar Conteudo Existente", "type": "main", "index": 0}], [{"node": "02 - Identificar Cliente", "type": "main", "index": 0}]]},
+    "Retomar Conteudo Existente": {"main": [[{"node": "04 - Gerar Imagem", "type": "main", "index": 0}]]},
+    "02 - Identificar Cliente": {"main": [[{"node": "03 - IA e Structured Output", "type": "main", "index": 0}]]},
+    "03 - IA e Structured Output": {"main": [[{"node": "Persistir Conteudo Completo", "type": "main", "index": 0}]]},
+    "Persistir Conteudo Completo": {"main": [[{"node": "04 - Gerar Imagem", "type": "main", "index": 0}]]},
+    "04 - Gerar Imagem": {"main": [[{"node": "05 - Render Inicial", "type": "main", "index": 0}]]},
+    "05 - Render Inicial": {"main": [[{"node": "Responder Conteudo Criado", "type": "main", "index": 0}]]}
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "51dc1202-584f-4fd1-aa6c-cd0d61003ac2",
+  "meta": {"templateCredsSetupCompleted": true},
+  "tags": []
+}

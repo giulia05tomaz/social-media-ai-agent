@@ -1,0 +1,394 @@
+{
+    "id": "phase62InitialRenderOrchestrator",
+    "name": "05 - Orquestrador de Render Inicial",
+    "active": false,
+    "settings": {
+        "executionOrder": "v1",
+        "timezone": "America/Sao_Paulo"
+    },
+    "nodes": [
+        {
+            "parameters": {
+                "inputSource": "passthrough"
+            },
+            "id": "d4135c18-8f50-4580-bcf5-600ac295f127",
+            "name": "Entrada Render Inicial",
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                -900,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT c.content_id,c.client_id,c.source_message_id::text,c.status,c.title,c.subtitle,c.cta,c.caption,c.hashtags,c.image_prompt,c.visual_description,c.assembly_instructions,c.automatic_response,c.ai_provider,c.ai_model,c.briefing,c.request AS intent,c.structured_output,v.id::text AS version_id,v.version,v.version_label,v.generated_image_path,b.logo_path,(b.primary_colors || b.secondary_colors) AS palette,COALESCE(b.preferences->>'default_template_id','') AS template_id,COALESCE((SELECT config_value FROM social_media.runtime_config WHERE config_key='art_renderer'),'local') AS renderer,ro.render_id::text AS existing_render_id,ro.status AS existing_render_status,ro.final_art_path AS existing_final_art_path,ro.layout_spec_path AS existing_layout_spec_path,ro.checksum_sha256 AS existing_checksum FROM social_media.content_items c JOIN social_media.content_versions v ON v.content_id=c.content_id AND v.version=1 JOIN social_media.clients b ON b.client_id=c.client_id LEFT JOIN social_media.render_outputs ro ON ro.version_id=v.id WHERE c.content_id=$1 LIMIT 1;",
+                "options": {
+                    "queryReplacement": "={{ [$json.content_id] }}"
+                }
+            },
+            "id": "1ad23954-c477-478f-b264-9e85499fa153",
+            "name": "Carregar Conteudo para Render",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.7,
+            "position": [
+                -680,
+                0
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "socialMediaPostgres",
+                    "name": "Social Media PostgreSQL"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const fs=require('fs');\nconst crypto=require('crypto');\nconst input=$json;\nif(!input.content_id||Number(input.version)!==1)throw new Error('Conteudo ou v1 nao encontrado para render inicial.');\nif(!input.template_id)throw new Error('Cliente sem default_template_id configurado.');\nif(!input.generated_image_path)throw new Error('Imagem fonte nao persistida.');\nconst dataPath=p=>'/data/'+String(p).replace(/^\\/+/, '');\nconst sourcePath=dataPath(input.generated_image_path);\nif(!fs.existsSync(sourcePath)||fs.statSync(sourcePath).size===0)throw new Error('Imagem fonte ausente ou vazia.');\nconst safeClient=String(input.client_id).replace(/[^a-zA-Z0-9_-]/g,'-');\nconst outputPath='assets/generated/'+safeClient+'/'+input.content_id+'/rendered/final-v1.png';\nconst layoutPath='assets/generated/'+safeClient+'/'+input.content_id+'/specs/layout-v1.json';\nconst outputFile=dataPath(outputPath),layoutFile=dataPath(layoutPath);\nconst artifactsExist=fs.existsSync(outputFile)&&fs.statSync(outputFile).size>0&&fs.existsSync(layoutFile)&&fs.statSync(layoutFile).size>0;\nlet recoveredLayout=null,recoveredChecksum=null;\nif(artifactsExist){recoveredLayout=JSON.parse(fs.readFileSync(layoutFile,'utf8'));recoveredChecksum=crypto.createHash('sha256').update(fs.readFileSync(outputFile)).digest('hex').toUpperCase();}\nreturn [{json:{...input,output_path:outputPath,layout_spec_path:layoutPath,artifacts_exist:artifactsExist,recovered_layout:recoveredLayout,recovered_checksum:recoveredChecksum}}];"
+            },
+            "id": "cfe1222f-620e-4d5b-9b50-36c6060b17cf",
+            "name": "Preparar Render Inicial",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -460,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 2
+                    },
+                    "conditions": [
+                        {
+                            "id": "32ca465a-63be-4478-8a02-56a44a065775",
+                            "leftValue": "={{ $json.artifacts_exist }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "true",
+                                "singleValue": true
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "fd1d925a-7556-41b3-a13c-415ac9bd7880",
+            "name": "Artefatos Ja Existem?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                -240,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const x=$json;return [{json:{status:'success',content_id:x.content_id,version_id:x.version_id,version_label:x.version_label,template_id:x.template_id,renderer:x.renderer,source_image_path:x.generated_image_path,output_path:x.output_path,layout_spec_path:x.layout_spec_path,width:1080,height:1080,format:'PNG',checksum_sha256:x.recovered_checksum,layout_spec:x.recovered_layout,recovered:true}}];"
+            },
+            "id": "9ef3a2da-33d2-435c-b83e-56bf02b2710b",
+            "name": "Recuperar Artefatos Existentes",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                20,
+                -140
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "WITH render_started AS (INSERT INTO social_media.render_outputs(content_id,version_id,template_id,renderer,source_image_path,final_art_path,layout_spec_path,status) VALUES($1,$2::uuid,$3,$4,$5,$6,$7,'CREATING_ART') ON CONFLICT(version_id) DO UPDATE SET template_id=EXCLUDED.template_id,renderer=EXCLUDED.renderer,source_image_path=EXCLUDED.source_image_path,final_art_path=EXCLUDED.final_art_path,layout_spec_path=EXCLUDED.layout_spec_path,status='CREATING_ART',error_message=NULL,updated_at=now() WHERE social_media.render_outputs.status IN ('CREATING_ART','FAILED','LAYOUT_VALIDATION_FAILED') RETURNING render_id), content_updated AS (UPDATE social_media.content_items SET status='CREATING_ART',updated_at=now() WHERE content_id=$1 AND status IN ('IMAGE_GENERATED','CREATING_ART','ART_RENDER_FAILED','LAYOUT_VALIDATION_FAILED') RETURNING client_id,source_message_id), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(m.correlation_id,gen_random_uuid()),c.client_id,$1,e.event_type,'05 - Orquestrador de Render Inicial',jsonb_build_object('version_id',$2::uuid,'template_id',$3,'renderer',$4) FROM content_updated c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id CROSS JOIN (VALUES('ART_RENDER_STARTED'),('LAYOUT_RESOLUTION_STARTED')) e(event_type) WHERE NOT EXISTS(SELECT 1 FROM social_media.events old WHERE old.content_id=$1 AND old.event_type=e.event_type AND old.details->>'version_id'=$2) RETURNING event_id) SELECT $1::text AS content_id,$2::text AS version_id,(SELECT render_id FROM render_started LIMIT 1)::text AS render_id;",
+                "options": {
+                    "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.template_id,$json.renderer,$json.generated_image_path,$json.output_path,$json.layout_spec_path] }}"
+                }
+            },
+            "id": "75639203-082b-4e37-b3c9-e4ad20299309",
+            "name": "Registrar Inicio do Render",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.7,
+            "position": [
+                20,
+                80
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "socialMediaPostgres",
+                    "name": "Social Media PostgreSQL"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://renderer:8000/render-initial",
+                "sendBody": true,
+                "contentType": "raw",
+                "rawContentType": "application/json",
+                "body": "={{ JSON.stringify({content_id:$('Preparar Render Inicial').first().json.content_id,version_id:$('Preparar Render Inicial').first().json.version_id,version_label:$('Preparar Render Inicial').first().json.version_label,client_id:$('Preparar Render Inicial').first().json.client_id,template_id:$('Preparar Render Inicial').first().json.template_id,renderer:$('Preparar Render Inicial').first().json.renderer,title:$('Preparar Render Inicial').first().json.title,subtitle:$('Preparar Render Inicial').first().json.subtitle||'',cta:$('Preparar Render Inicial').first().json.cta||'',source_image_path:$('Preparar Render Inicial').first().json.generated_image_path,logo_path:$('Preparar Render Inicial').first().json.logo_path,palette:$('Preparar Render Inicial').first().json.palette,output_path:$('Preparar Render Inicial').first().json.output_path,layout_spec_path:$('Preparar Render Inicial').first().json.layout_spec_path}) }}",
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "46b2243a-e156-4c11-ad08-24de397f915a",
+            "name": "Renderer Inicial Interno",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                260,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 2
+                    },
+                    "conditions": [
+                        {
+                            "id": "db6c0c10-6588-4f13-a8e2-acde8e47e791",
+                            "leftValue": "={{ $json.status }}",
+                            "rightValue": "success",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "82f88a57-03e2-44fa-85da-56696819947e",
+            "name": "Render Inicial OK?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                500,
+                20
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "WITH ctx AS (SELECT c.content_id,c.client_id,c.source_message_id,c.title,c.subtitle,c.cta,c.caption,c.hashtags,c.image_prompt,c.visual_description,c.assembly_instructions,c.automatic_response,c.ai_provider,c.ai_model,c.briefing,c.request AS intent,c.structured_output,v.id AS version_id,v.version_label,m.correlation_id,m.channel FROM social_media.content_items c JOIN social_media.content_versions v ON v.id=$2::uuid LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id WHERE c.content_id=$1), render_ready AS (UPDATE social_media.render_outputs SET template_id=$3,renderer=$4,source_image_path=$5,final_art_path=$6,layout_spec_path=$7,layout_spec=$8::jsonb,width=$9::int,height=$10::int,checksum_sha256=$11,status='READY_FOR_APPROVAL',error_message=NULL,rendered_at=now(),updated_at=now() WHERE version_id=$2::uuid RETURNING render_id), version_ready AS (UPDATE social_media.content_versions SET final_art_path=$6 WHERE id=$2::uuid RETURNING version_label), content_ready AS (UPDATE social_media.content_items SET current_version_id=$2::uuid,final_art_path=$6,status='READY_FOR_APPROVAL',updated_at=now() WHERE content_id=$1 RETURNING content_id), events AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,ctx.content_id,e.event_type,'05 - Orquestrador de Render Inicial',e.details FROM ctx CROSS JOIN LATERAL(VALUES ('LAYOUT_CREATED',jsonb_build_object('version_id',$2::uuid,'layout_spec_path',$7,'template_id',$3)),('ART_RENDERED',jsonb_build_object('version_id',$2::uuid,'width',$9::int,'height',$10::int,'checksum_sha256',$11)),('ART_READY_FOR_APPROVAL',jsonb_build_object('version_id',$2::uuid,'final_art_path',$6,'layout_spec_path',$7))) e(event_type,details) WHERE NOT EXISTS(SELECT 1 FROM social_media.events old WHERE old.content_id=ctx.content_id AND old.event_type=e.event_type AND old.details->>'version_id'=$2) RETURNING event_id), outbound AS (INSERT INTO social_media.messages(correlation_id,client_id,channel,direction,sender_id,body,raw_payload) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,COALESCE(ctx.channel,'demo'),'OUTBOUND','social-media-ai-agent','Preparei a arte solicitada. Segue a primeira vers\u00e3o para aprova\u00e7\u00e3o. Se quiser alguma altera\u00e7\u00e3o, \u00e9 s\u00f3 me dizer.',jsonb_build_object('content_id',ctx.content_id,'version_id',$2::uuid,'version_label',ctx.version_label,'final_art_path',$6,'channel_adapter','demo') FROM ctx WHERE NOT EXISTS(SELECT 1 FROM social_media.messages om WHERE om.direction='OUTBOUND' AND om.raw_payload->>'content_id'=ctx.content_id AND om.raw_payload->>'version_id'=$2) RETURNING message_id), outbound_event AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,details) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,ctx.content_id,'OUTBOUND_CREATED','05 - Orquestrador de Render Inicial',jsonb_build_object('version_id',$2::uuid,'final_art_path',$6,'message_id',(SELECT message_id FROM outbound)) FROM ctx WHERE EXISTS(SELECT 1 FROM outbound) RETURNING event_id) SELECT ctx.content_id,ctx.client_id,ctx.version_id,ctx.version_label,'READY_FOR_APPROVAL'::text AS status,ctx.title,ctx.subtitle,ctx.cta,ctx.caption,ctx.hashtags,ctx.image_prompt,ctx.visual_description,ctx.assembly_instructions,ctx.automatic_response,ctx.ai_provider,ctx.ai_model,ctx.briefing,ctx.intent,ctx.structured_output,$5::text AS source_image_path,$6::text AS final_art_path,$7::text AS layout_spec_path,$9::int AS width,$10::int AS height,$11::text AS checksum_sha256,(SELECT render_id FROM render_ready) AS render_id,(SELECT message_id FROM outbound) AS outbound_message_id,true AS persisted,true AS demo_mode,false AS external_actions_executed FROM ctx;",
+                "options": {
+                    "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.template_id,$json.renderer,$json.source_image_path,$json.output_path,$json.layout_spec_path,JSON.stringify($json.layout_spec),$json.width,$json.height,$json.checksum_sha256] }}"
+                }
+            },
+            "id": "ddc311fc-b8ed-4165-8f7b-61ea97718074",
+            "name": "Persistir Arte Inicial",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.7,
+            "position": [
+                760,
+                -80
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "socialMediaPostgres",
+                    "name": "Social Media PostgreSQL"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "WITH final_message AS (SELECT message_id FROM social_media.messages WHERE direction='OUTBOUND' AND raw_payload->>'content_id'=$1 AND raw_payload->>'version_id'=$2 ORDER BY created_at DESC LIMIT 1), deleted AS (DELETE FROM social_media.messages WHERE direction='OUTBOUND' AND raw_payload->>'content_id'=$1 AND NOT (raw_payload ? 'version_id') AND message_id<>(SELECT message_id FROM final_message) RETURNING message_id) SELECT $3::jsonb AS result,(SELECT count(*) FROM deleted) AS consolidated_messages;",
+                "options": {
+                    "queryReplacement": "={{ [$json.content_id,$json.version_id,JSON.stringify($json)] }}"
+                }
+            },
+            "id": "f89be3b7-19d1-40d5-ad83-0d98706c416d",
+            "name": "Consolidar Outbound Inicial",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.7,
+            "position": [
+                980,
+                -80
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "socialMediaPostgres",
+                    "name": "Social Media PostgreSQL"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "return [{json:$json.result}];"
+            },
+            "id": "c2a32107-d17f-45c6-9e16-249c49114d7e",
+            "name": "Retornar Criacao Inicial",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1200,
+                -80
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "WITH ctx AS (SELECT c.client_id,c.source_message_id,m.correlation_id FROM social_media.content_items c LEFT JOIN social_media.messages m ON m.message_id=c.source_message_id WHERE c.content_id=$1), render_failed AS (UPDATE social_media.render_outputs SET status=CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'FAILED' END,error_message=$3,updated_at=now() WHERE version_id=$2::uuid RETURNING render_id), content_failed AS (UPDATE social_media.content_items SET status=CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'ART_RENDER_FAILED' END,updated_at=now() WHERE content_id=$1 RETURNING content_id), event_created AS (INSERT INTO social_media.events(correlation_id,client_id,content_id,event_type,workflow_name,severity,details) SELECT COALESCE(ctx.correlation_id,gen_random_uuid()),ctx.client_id,$1,CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'ART_RENDER_FAILED' END,'05 - Orquestrador de Render Inicial','ERROR',jsonb_build_object('version_id',$2::uuid,'error',$3,'error_code',$4,'validation',$5::jsonb,'source_image_reusable',true) FROM ctx RETURNING event_id) SELECT $1::text AS content_id,$2::uuid AS version_id,CASE WHEN $4='LAYOUT_VALIDATION_FAILED' THEN 'LAYOUT_VALIDATION_FAILED' ELSE 'ART_RENDER_FAILED' END AS status,$3::text AS error,$5::jsonb AS validation,false AS persisted,false AS image_regenerated;",
+                "options": {
+                    "queryReplacement": "={{ [$json.content_id,$json.version_id,$json.error,$json.error_code||'ART_RENDER_FAILED',JSON.stringify($json.validation||{})] }}"
+                }
+            },
+            "id": "3a6249d2-ad50-4559-96f6-eed0c3534ba5",
+            "name": "Persistir Falha do Render Inicial",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.7,
+            "position": [
+                760,
+                140
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "socialMediaPostgres",
+                    "name": "Social Media PostgreSQL"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Entrada Render Inicial": {
+            "main": [
+                [
+                    {
+                        "node": "Carregar Conteudo para Render",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Carregar Conteudo para Render": {
+            "main": [
+                [
+                    {
+                        "node": "Preparar Render Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Preparar Render Inicial": {
+            "main": [
+                [
+                    {
+                        "node": "Artefatos Ja Existem?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Artefatos Ja Existem?": {
+            "main": [
+                [
+                    {
+                        "node": "Recuperar Artefatos Existentes",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Registrar Inicio do Render",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Recuperar Artefatos Existentes": {
+            "main": [
+                [
+                    {
+                        "node": "Persistir Arte Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Registrar Inicio do Render": {
+            "main": [
+                [
+                    {
+                        "node": "Renderer Inicial Interno",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Renderer Inicial Interno": {
+            "main": [
+                [
+                    {
+                        "node": "Render Inicial OK?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Render Inicial OK?": {
+            "main": [
+                [
+                    {
+                        "node": "Persistir Arte Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Persistir Falha do Render Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Persistir Arte Inicial": {
+            "main": [
+                [
+                    {
+                        "node": "Consolidar Outbound Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Consolidar Outbound Inicial": {
+            "main": [
+                [
+                    {
+                        "node": "Retornar Criacao Inicial",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "tags": []
+}
