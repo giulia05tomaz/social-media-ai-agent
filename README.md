@@ -17,6 +17,10 @@
 
 > Uma automação multi-cliente para criação, revisão, aprovação, agendamento e distribuição de conteúdo com IA — com identidade de marca e rastreabilidade em cada etapa.
 
+## Navegação
+
+[Visão geral](#sobre-o-projeto) · [Fluxo](#como-funciona) · [Arquitetura](#arquitetura) · [APIs](#apis-dos-serviços) · [Testes](#testes) · [Execução local](#executando-localmente) · [Roadmap](#roadmap)
+
 ## Sobre o projeto
 
 O **AI Social Media Agent** automatiza o fluxo de Social Media desde a mensagem inicial até a publicação. O sistema identifica o cliente, carrega sua identidade visual e suas regras, interpreta a intenção, gera conteúdo estruturado, produz a imagem, monta a arte e mantém o processo de revisão, aprovação e agendamento sob controle.
@@ -86,6 +90,19 @@ Os workflows coordenam serviços pequenos e especializados. A comunicação usa 
 
 Detalhes técnicos: [arquitetura](docs/architecture.md) e [segurança](docs/security.md).
 
+## APIs dos serviços
+
+Os serviços FastAPI são internos ao ambiente Docker. Os endpoints de mídia e publicação validam credenciais internas; as operações de publicação continuam subordinadas aos guards de ambiente, posse do conteúdo e versão aprovada.
+
+| Serviço | Endpoints principais | Finalidade |
+| --- | --- | --- |
+| Renderer | `POST /render-initial`, `POST /apply-and-render`, `POST /validate-image` | Composição, revisão e validação de imagem |
+| Media delivery | `POST /internal/tokens`, `GET /media/{token}` | Emissão de acesso controlado e entrega de mídia aprovada |
+| Publication | `POST /prepare-publication`, `POST /preflight-publication`, `POST /publish-authorized` | Preparação, conferência e publicação autorizada |
+| Todos | `GET /health` | Diagnóstico básico de cada serviço |
+
+Implementações: [renderer](renderer/service.py), [mídia](media-delivery/service.py) e [publicação](publication/service.py). Os schemas FastAPI são definidos junto às rotas. Para experimentar o projeto, comece pelo fluxo local em modo mock; a publicação real depende de configuração externa e autorização explícita.
+
 ## Aprovação e versionamento
 
 ![Fluxo de aprovação e versionamento](docs/images/approval-versioning.png)
@@ -139,6 +156,8 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 Durante o desenvolvimento, o fluxo também foi validado em cenários de word wrapping, colisão, versionamento, aprovação, scheduler, timezone, idempotência, isolamento entre clientes, upload R2, Buffer dry-run e guards de publicação. Nenhuma chamada externa é necessária para executar os testes públicos.
 
+A suíte pública é executada localmente. Não há workflow de GitHub Actions neste repositório; os cenários históricos de integração descritos acima são distintos dos testes públicos.
+
 ## Executando localmente
 
 ### Pré-requisitos
@@ -152,6 +171,8 @@ git clone https://github.com/giulia05tomaz/social-media-ai-agent.git
 cd social-media-ai-agent
 cp .env.example .env
 ```
+
+No PowerShell, utilize `Copy-Item .env.example .env` para copiar o arquivo de exemplo.
 
 Preencha no `.env` as credenciais locais do PostgreSQL e as chaves internas obrigatórias. Mantenha os guards seguros para o primeiro boot:
 
